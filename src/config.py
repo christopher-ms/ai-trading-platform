@@ -1,0 +1,5 @@
+STOCKS = ["AAPL", "MSFT", "NVDA", "AMZN"]
+
+HISTORY_PERIOD = "3mo"
+
+LOG_LEVEL = "INFO"
