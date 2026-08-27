@@ -1,0 +1,1 @@
+print("AI Trading Platform is running!")
