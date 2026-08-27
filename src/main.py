@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
+from src.analysis.technical import calculate_indicators
 from src.config import LOG_LEVEL, STOCKS
 from src.data.market import get_market_data
 
@@ -41,9 +42,49 @@ def is_market_hours() -> bool:
     return market_open <= now.time() <= market_close
 
 
+def analyze_stock(ticker: str) -> None:
+    """
+    Retrieve market data and calculate technical indicators for a stock.
+
+    Args:
+        ticker: Stock ticker symbol.
+
+    Returns:
+        None.
+    """
+    logger = logging.getLogger(__name__)
+
+    try:
+        data = get_market_data(ticker)
+        indicators = calculate_indicators(data)
+
+        latest_price = data["Close"].iloc[-1]
+
+        logger.info(
+            "%s | Price: $%.2f | 20MA: $%.2f | 50MA: $%.2f | "
+            "RSI: %.2f | MACD: %.2f | Volume Ratio: %.2f | "
+            "Volatility: %.2f",
+            ticker,
+            latest_price,
+            indicators["moving_average_20"],
+            indicators["moving_average_50"],
+            indicators["rsi"],
+            indicators["macd"],
+            indicators["volume_ratio"],
+            indicators["volatility"],
+        )
+
+    except Exception as error:
+        logger.error(
+            "Unable to analyze %s: %s",
+            ticker,
+            error,
+        )
+
+
 def run() -> None:
     """
-    Retrieve market data for all configured stocks.
+    Run technical analysis for all configured stocks.
 
     Returns:
         None.
@@ -55,23 +96,7 @@ def run() -> None:
         return
 
     for ticker in STOCKS:
-        try:
-            data = get_market_data(ticker)
-
-            latest_price = data["Close"].iloc[-1]
-
-            logger.info(
-                "%s latest closing price: $%.2f",
-                ticker,
-                latest_price,
-            )
-
-        except Exception as error:
-            logger.error(
-                "Unable to process %s: %s",
-                ticker,
-                error,
-            )
+        analyze_stock(ticker)
 
 
 if __name__ == "__main__":
