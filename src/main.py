@@ -1,14 +1,10 @@
 import logging
-from datetime import datetime, time
-from zoneinfo import ZoneInfo
 
 from src.analysis.technical import calculate_indicators
 from src.config import LOG_LEVEL, STOCKS
 from src.data.market import get_market_data
 from src.data.news import get_stock_news
-
-
-EASTERN_TIMEZONE = ZoneInfo("America/New_York")
+from src.utils.market_hours import is_market_hours
 
 
 def setup_logging() -> None:
@@ -22,25 +18,6 @@ def setup_logging() -> None:
         level=getattr(logging, LOG_LEVEL),
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
-
-
-def is_market_hours() -> bool:
-    """
-    Check whether the current time falls within regular U.S. market hours.
-
-    Returns:
-        True when the current time is Monday through Friday between
-        9:30 AM and 4:00 PM Eastern Time; otherwise False.
-    """
-    now = datetime.now(EASTERN_TIMEZONE)
-
-    if now.weekday() >= 5:
-        return False
-
-    market_open = time(9, 30)
-    market_close = time(16, 0)
-
-    return market_open <= now.time() <= market_close
 
 
 def analyze_stock(ticker: str) -> None:
