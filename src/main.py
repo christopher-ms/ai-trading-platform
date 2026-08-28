@@ -1,9 +1,11 @@
 import logging
 
+from src.analysis.signals import generate_signal
 from src.analysis.technical import calculate_indicators
 from src.config import LOG_LEVEL, STOCKS
 from src.data.market import get_market_data
 from src.data.news import get_stock_news
+from src.trading.executor import execute_signal
 from src.utils.market_hours import is_market_hours
 
 
@@ -22,8 +24,11 @@ def setup_logging() -> None:
 
 def analyze_stock(ticker: str) -> None:
     """
-    Retrieve market data, calculate technical indicators, and pull
-    recent news for a stock.
+    Analyze a stock and, if warranted, trade it.
+
+    Retrieves market data, calculates technical indicators, and pulls
+    recent news; sends both to Claude to generate a trading signal; then
+    runs that signal through risk management and execution.
 
     Args:
         ticker: Stock ticker symbol.
@@ -79,6 +84,19 @@ def analyze_stock(ticker: str) -> None:
             ticker,
             error,
         )
+        articles = []
+
+    try:
+        signal = generate_signal(ticker, indicators, articles)
+    except Exception as error:
+        logger.error(
+            "Unable to generate a trading signal for %s: %s",
+            ticker,
+            error,
+        )
+        return
+
+    execute_signal(signal)
 
 
 def run() -> None:
