@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 from src.analysis.technical import calculate_indicators
 from src.config import LOG_LEVEL, STOCKS
 from src.data.market import get_market_data
+from src.data.news import get_stock_news
 
 
 EASTERN_TIMEZONE = ZoneInfo("America/New_York")
@@ -44,7 +45,8 @@ def is_market_hours() -> bool:
 
 def analyze_stock(ticker: str) -> None:
     """
-    Retrieve market data and calculate technical indicators for a stock.
+    Retrieve market data, calculate technical indicators, and pull
+    recent news for a stock.
 
     Args:
         ticker: Stock ticker symbol.
@@ -77,6 +79,26 @@ def analyze_stock(ticker: str) -> None:
     except Exception as error:
         logger.error(
             "Unable to analyze %s: %s",
+            ticker,
+            error,
+        )
+        return
+
+    try:
+        articles = get_stock_news(ticker)
+
+        if articles:
+            logger.info(
+                "%s | Recent headlines: %s",
+                ticker,
+                " || ".join(article["title"] for article in articles),
+            )
+        else:
+            logger.info("%s | No recent news found.", ticker)
+
+    except Exception as error:
+        logger.warning(
+            "Unable to retrieve news for %s: %s",
             ticker,
             error,
         )
