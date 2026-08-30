@@ -4,8 +4,9 @@ from typing import Literal
 import anthropic
 from pydantic import BaseModel, Field
 
-from src.config import ANTHROPIC_API_KEY
+from src.config import ANTHROPIC_API_KEY, MIN_TRADE_CONFIDENCE
 from src.trading.risk import TradingSignal
+from src.utils import monitoring
 
 
 logger = logging.getLogger(__name__)
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 MODEL = "claude-opus-5"
 MAX_TOKENS = 4096
 
-SYSTEM_PROMPT = """You are a disciplined trading analyst for a paper-trading system. \
+SYSTEM_PROMPT = f"""You are a disciplined trading analyst for a paper-trading system. \
 You produce a single trading signal (BUY, SELL, or HOLD) for one stock at a time, \
 based only on the technical indicators and news headlines given to you in the user \
 message. Never invent data, prices, or news you were not given.
@@ -33,8 +34,9 @@ Decision policy:
 setup with no supporting news, or news with no technical confirmation, should \
 lower your confidence.
 - Confidence must reflect your genuine estimate of the probability this signal is \
-correct, not enthusiasm. This system only executes trades at confidence >= 0.7, \
-so reserve high confidence for cases where indicators and news clearly agree.
+correct, not enthusiasm. This system only executes trades at confidence >= \
+{MIN_TRADE_CONFIDENCE:.2f}, so reserve high confidence for cases where indicators \
+and news clearly agree.
 - When signals conflict, headlines are sparse or irrelevant, or you are unsure, \
 respond HOLD with a lower confidence rather than guessing a direction.
 - reasoning should be 1-3 sentences citing the specific indicators and/or \
@@ -125,7 +127,11 @@ def generate_signal(
     Raises:
         ValueError: If ANTHROPIC_API_KEY is not set, or Claude's output fails
             TradingSignal's own validation.
-        anthropic.APIError: If the request to Claude fails.
+        anthropic.RateLimitError: If Claude is rate limited. Callers should
+            treat this as "skip this stock for this run," not retry - see
+            the docstring below for why.
+        anthropic.APIError: If the request to Claude fails for any other
+            reason.
     """
     client = get_client()
 
@@ -136,12 +142,31 @@ def generate_signal(
         "Based only on the data above, provide a trading signal."
     )
 
-    response = client.messages.parse(
-        model=MODEL,
-        max_tokens=MAX_TOKENS,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_prompt}],
-        output_format=_SignalOutput,
+    monitoring.log_api_call("anthropic", "messages.parse")
+
+    try:
+        response = client.messages.parse(
+            model=MODEL,
+            max_tokens=MAX_TOKENS,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_prompt}],
+            output_format=_SignalOutput,
+        )
+    except anthropic.RateLimitError as error:
+        # Retrying immediately would just burn another call against the
+        # same limit. main.py's caller already skips this ticker on any
+        # exception from generate_signal - this just makes the reason
+        # unambiguous in the logs rather than a generic API error.
+        logger.warning(
+            "%s | Anthropic rate limit hit; skipping this stock for this run: %s",
+            ticker,
+            error,
+        )
+        raise
+
+    monitoring.log_claude_usage(
+        input_tokens=response.usage.input_tokens,
+        output_tokens=response.usage.output_tokens,
     )
 
     parsed = response.parsed_output

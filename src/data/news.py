@@ -1,37 +1,26 @@
 import logging
 from datetime import datetime, timedelta, timezone
 
-from newsapi import NewsApiClient
-
-from src.config import NEWS_API_KEY
+from src.data.finnhub_client import get_company_news
 
 
 logger = logging.getLogger(__name__)
 
-
-def get_news_client() -> NewsApiClient:
-    """
-    Create a NewsAPI client using the configured API key.
-
-    Returns:
-        Configured NewsApiClient instance.
-
-    Raises:
-        ValueError: If the NewsAPI key is missing.
-    """
-    if not NEWS_API_KEY:
-        raise ValueError("NEWS_API_KEY environment variable is not set.")
-
-    return NewsApiClient(api_key=NEWS_API_KEY)
+NEWS_LOOKBACK_HOURS = 4
 
 
 def get_stock_news(
     ticker: str,
-    hours: int = 24,
+    hours: int = NEWS_LOOKBACK_HOURS,
     max_articles: int = 5,
 ) -> list[dict[str, str]]:
     """
     Retrieve recent news articles related to a stock ticker.
+
+    Finnhub's company-news date range is day-granularity only (YYYY-MM-DD),
+    so this requests every calendar day the lookback window could touch
+    and filters down to the real cutoff itself using each article's exact
+    timestamp.
 
     Args:
         ticker: Stock ticker symbol.
@@ -39,35 +28,38 @@ def get_stock_news(
         max_articles: Maximum number of articles to return.
 
     Returns:
-        List of cleaned news article dictionaries.
+        List of cleaned news article dictionaries, most recent first.
 
     Raises:
-        Exception: If the NewsAPI request fails.
+        Exception: If the Finnhub request fails.
     """
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=hours)
+
     try:
-        client = get_news_client()
-
-        end_time = datetime.now(timezone.utc)
-        start_time = end_time - timedelta(hours=hours)
-
-        response = client.get_everything(
-            q=ticker,
-            from_param=start_time.strftime("%Y-%m-%dT%H:%M:%S"),
-            to=end_time.strftime("%Y-%m-%dT%H:%M:%S"),
-            language="en",
-            sort_by="publishedAt",
-            page_size=max_articles,
+        articles = get_company_news(
+            ticker,
+            from_date=cutoff.strftime("%Y-%m-%d"),
+            to_date=now.strftime("%Y-%m-%d"),
         )
 
-        articles = response.get("articles", [])
+        recent_articles = [
+            article
+            for article in articles
+            if datetime.fromtimestamp(article.get("datetime", 0), tz=timezone.utc)
+            >= cutoff
+        ]
+        recent_articles.sort(key=lambda article: article.get("datetime", 0), reverse=True)
+        recent_articles = recent_articles[:max_articles]
 
         logger.info(
-            "Retrieved %d news articles for %s.",
-            len(articles),
+            "Retrieved %d news articles for %s (last %dh).",
+            len(recent_articles),
             ticker,
+            hours,
         )
 
-        return format_articles(articles)
+        return format_articles(recent_articles)
 
     except Exception as error:
         logger.error(
@@ -82,10 +74,10 @@ def format_articles(
     articles: list[dict],
 ) -> list[dict[str, str]]:
     """
-    Clean raw NewsAPI articles into a compact format for analysis.
+    Clean raw Finnhub articles into a compact format for analysis.
 
     Args:
-        articles: Raw articles returned by NewsAPI.
+        articles: Raw articles returned by Finnhub's company-news endpoint.
 
     Returns:
         List containing title, source, published time, description,
@@ -94,12 +86,16 @@ def format_articles(
     formatted_articles = []
 
     for article in articles:
+        published_at = datetime.fromtimestamp(
+            article.get("datetime", 0), tz=timezone.utc
+        ).isoformat()
+
         formatted_articles.append(
             {
-                "title": article.get("title", ""),
-                "source": article.get("source", {}).get("name", ""),
-                "published_at": article.get("publishedAt", ""),
-                "description": article.get("description", "") or "",
+                "title": article.get("headline", ""),
+                "source": article.get("source", ""),
+                "published_at": published_at,
+                "description": article.get("summary", "") or "",
                 "url": article.get("url", ""),
             }
         )

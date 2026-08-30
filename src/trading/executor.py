@@ -3,15 +3,20 @@ import time
 from dataclasses import dataclass
 
 from alpaca.common.exceptions import APIError
-from alpaca.data.historical.stock import StockHistoricalDataClient
-from alpaca.data.requests import StockLatestTradeRequest
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.trading.models import Order
 from alpaca.trading.requests import MarketOrderRequest
 
 from src.config import ALPACA_API_KEY, ALPACA_SECRET_KEY
-from src.trading.risk import TradingSignal, calculate_position_size, evaluate_signal
+from src.data.market import get_live_price
+from src.trading.risk import (
+    TradingSignal,
+    calculate_position_size,
+    evaluate_signal,
+    record_trade_executed,
+)
+from src.utils import monitoring
 
 
 logger = logging.getLogger(__name__)
@@ -68,25 +73,6 @@ def get_trading_client() -> TradingClient:
     return TradingClient(ALPACA_API_KEY, ALPACA_SECRET_KEY, paper=True)
 
 
-def get_data_client() -> StockHistoricalDataClient:
-    """
-    Build an Alpaca market data client for price lookups.
-
-    Returns:
-        A StockHistoricalDataClient configured with the same paper
-        trading credentials used for order execution.
-
-    Raises:
-        ValueError: If ALPACA_API_KEY or ALPACA_SECRET_KEY is not set.
-    """
-    if not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
-        raise ValueError(
-            "ALPACA_API_KEY and ALPACA_SECRET_KEY must be set in .env."
-        )
-
-    return StockHistoricalDataClient(ALPACA_API_KEY, ALPACA_SECRET_KEY)
-
-
 def get_portfolio_value(client: TradingClient) -> float:
     """
     Fetch the account's total portfolio value.
@@ -115,29 +101,6 @@ def get_open_position_quantities(client: TradingClient) -> dict[str, float]:
     """
     positions = client.get_all_positions()
     return {position.symbol: float(position.qty) for position in positions}
-
-
-def get_latest_price(data_client: StockHistoricalDataClient, symbol: str) -> float:
-    """
-    Fetch the latest traded price for a symbol.
-
-    Args:
-        data_client: Alpaca market data client.
-        symbol: Stock ticker symbol.
-
-    Returns:
-        The most recent trade price.
-
-    Raises:
-        RuntimeError: If no trade data is returned for the symbol.
-    """
-    request = StockLatestTradeRequest(symbol_or_symbols=symbol)
-    trades = data_client.get_stock_latest_trade(request)
-
-    if symbol not in trades:
-        raise RuntimeError(f"No latest trade data returned for {symbol}.")
-
-    return float(trades[symbol].price)
 
 
 def submit_market_order(
@@ -214,6 +177,7 @@ def execute_signal(signal: TradingSignal) -> TradeResult:
             reason="Signal action is HOLD; no trade to execute.",
         )
         logger.info("%s | %s | %s", result.symbol, result.status, result.reason)
+        monitoring.record_trade_result(result.status)
         return result
 
     try:
@@ -228,6 +192,7 @@ def execute_signal(signal: TradingSignal) -> TradeResult:
             reason=f"Failed to reach Alpaca to check account state: {error}",
         )
         logger.error("%s | %s | %s", result.symbol, result.status, result.reason)
+        monitoring.record_trade_result(result.status)
         return result
 
     current_qty = open_positions.get(signal.symbol, 0.0)
@@ -248,11 +213,11 @@ def execute_signal(signal: TradingSignal) -> TradeResult:
             reason=decision.reason,
         )
         logger.info("%s | %s | %s", result.symbol, result.status, result.reason)
+        monitoring.record_trade_result(result.status)
         return result
 
     try:
-        data_client = get_data_client()
-        price = get_latest_price(data_client, signal.symbol)
+        price = get_live_price(signal.symbol)
     except Exception as error:
         result = TradeResult(
             status="ERROR",
@@ -261,6 +226,7 @@ def execute_signal(signal: TradingSignal) -> TradeResult:
             reason=f"Failed to fetch latest price: {error}",
         )
         logger.error("%s | %s | %s", result.symbol, result.status, result.reason)
+        monitoring.record_trade_result(result.status)
         return result
 
     quantity = calculate_position_size(
@@ -282,6 +248,7 @@ def execute_signal(signal: TradingSignal) -> TradeResult:
             reason=reason,
         )
         logger.info("%s | %s | %s", result.symbol, result.status, result.reason)
+        monitoring.record_trade_result(result.status)
         return result
 
     try:
@@ -299,6 +266,8 @@ def execute_signal(signal: TradingSignal) -> TradeResult:
             reason=f"Alpaca rejected the order request: {error}",
         )
         logger.error("%s | %s | %s", result.symbol, result.status, result.reason)
+        monitoring.record_trade_result(result.status)
+        monitoring.record_alpaca_order_outcome(success=False, reason=result.reason)
         return result
     except Exception as error:
         result = TradeResult(
@@ -308,6 +277,8 @@ def execute_signal(signal: TradingSignal) -> TradeResult:
             reason=f"Unexpected error submitting order: {error}",
         )
         logger.error("%s | %s | %s", result.symbol, result.status, result.reason)
+        monitoring.record_trade_result(result.status)
+        monitoring.record_alpaca_order_outcome(success=False, reason=result.reason)
         return result
 
     if order.status.value == "rejected":
@@ -319,6 +290,8 @@ def execute_signal(signal: TradingSignal) -> TradeResult:
             order_id=str(order.id),
         )
         logger.warning("%s | %s | %s", result.symbol, result.status, result.reason)
+        monitoring.record_trade_result(result.status)
+        monitoring.record_alpaca_order_outcome(success=False, reason=result.reason)
         return result
 
     if order.status.value != "filled":
@@ -333,7 +306,10 @@ def execute_signal(signal: TradingSignal) -> TradeResult:
             order_id=str(order.id),
         )
         logger.info("%s | %s | %s", result.symbol, result.status, result.reason)
+        monitoring.record_trade_result(result.status)
         return result
+
+    record_trade_executed()
 
     result = TradeResult(
         status="FILLED",
@@ -353,4 +329,6 @@ def execute_signal(signal: TradingSignal) -> TradeResult:
         result.order_id,
         signal.reasoning,
     )
+    monitoring.record_trade_result(result.status)
+    monitoring.record_alpaca_order_outcome(success=True)
     return result

@@ -8,6 +8,7 @@ cffi==2.1.1
 charset-normalizer==3.5.1
 curl_cffi==0.16.2
 docstring_parser==0.18.0
+finnhub-python==2.4.24
 h11==0.16.0
 httpcore2==2.12.0
 httpx2==2.12.0
@@ -16,7 +17,6 @@ jiter==0.16.0
 lxml==6.1.2
 msgpack==1.2.2
 multitasking==0.0.13
-newsapi-python==0.2.7
 numpy==2.5.2
 pandas==3.0.5
 peewee==4.4.0
