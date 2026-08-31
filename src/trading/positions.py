@@ -13,6 +13,7 @@ from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide
 
 from src.config import STOP_LOSS_PCT, TAKE_PROFIT_PCT, TRAILING_STOP_TRIGGER_PCT
+from src.data import db
 from src.trading.executor import TradeResult, submit_market_order
 from src.trading.risk import record_trade_executed
 from src.utils import monitoring
@@ -21,9 +22,22 @@ from src.utils import monitoring
 logger = logging.getLogger(__name__)
 
 # Symbols whose stop-loss has been moved to breakeven under the trailing
-# rule. In-memory only - see _DailyState's docstring in src/trading/risk.py
-# for why that's an acceptable simplification here.
+# rule. Kept in memory for the running process; every add/discard is also
+# written through to DynamoDB (src/data/db.py) so a restart doesn't
+# revert an active trailing stop back to a plain stop-loss. Best-effort -
+# a DynamoDB outage just means that durability is temporarily lost, not
+# that trailing-stop logic stops working for the running process.
 _trailing_stop_active: set[str] = set()
+_trailing_stops_loaded = False
+
+
+def _ensure_trailing_stops_loaded() -> None:
+    """Hydrate _trailing_stop_active from DynamoDB once per process."""
+    global _trailing_stops_loaded
+    if _trailing_stops_loaded:
+        return
+    _trailing_stop_active.update(db.load_trailing_stops())
+    _trailing_stops_loaded = True
 
 
 def _close_position(
@@ -58,7 +72,7 @@ def _close_position(
             reason=f"Failed to submit exit order ({reason}): {error}",
         )
         logger.error("%s | %s | %s", result.symbol, result.status, result.reason)
-        monitoring.record_trade_result(result.status)
+        monitoring.record_trade_result(result, source="stop_exit")
         monitoring.record_alpaca_order_outcome(success=False, reason=result.reason)
         return result
 
@@ -93,7 +107,7 @@ def _close_position(
         )
 
     logger.info("%s | %s | %s", result.symbol, result.status, result.reason)
-    monitoring.record_trade_result(result.status)
+    monitoring.record_trade_result(result, source="stop_exit")
     return result
 
 
@@ -115,9 +129,14 @@ def check_open_positions(client: TradingClient) -> list[TradeResult]:
     Returns:
         A TradeResult for every position closed this cycle (empty if none).
     """
+    _ensure_trailing_stops_loaded()
+
     positions = client.get_all_positions()
     live_symbols = {position.symbol for position in positions}
+    stale_symbols = _trailing_stop_active - live_symbols
     _trailing_stop_active.intersection_update(live_symbols)
+    for symbol in stale_symbols:
+        db.delete_trailing_stop(symbol)
 
     results = []
 
@@ -128,8 +147,9 @@ def check_open_positions(client: TradingClient) -> list[TradeResult]:
         current_price = float(position.current_price)
         pl_pct = (current_price - entry_price) / entry_price
 
-        if pl_pct >= TRAILING_STOP_TRIGGER_PCT:
+        if pl_pct >= TRAILING_STOP_TRIGGER_PCT and symbol not in _trailing_stop_active:
             _trailing_stop_active.add(symbol)
+            db.save_trailing_stop(symbol)
 
         trailing_active = symbol in _trailing_stop_active
         effective_stop_pct = 0.0 if trailing_active else -STOP_LOSS_PCT
@@ -143,9 +163,11 @@ def check_open_positions(client: TradingClient) -> list[TradeResult]:
             reason = f"{stop_label} triggered at {pl_pct:+.2%} unrealized"
             results.append(_close_position(client, symbol, qty, reason))
             _trailing_stop_active.discard(symbol)
+            db.delete_trailing_stop(symbol)
         elif pl_pct >= TAKE_PROFIT_PCT:
             reason = f"take-profit (+{TAKE_PROFIT_PCT:.1%}) triggered at {pl_pct:+.2%} unrealized"
             results.append(_close_position(client, symbol, qty, reason))
             _trailing_stop_active.discard(symbol)
+            db.delete_trailing_stop(symbol)
 
     return results

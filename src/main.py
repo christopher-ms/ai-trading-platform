@@ -171,6 +171,7 @@ def run() -> None:
             trades_filled_this_run += 1
 
     monitoring.check_zero_trade_streak(trades_filled_this_run)
+    monitoring.persist_state()
 
 
 def run_forever() -> None:

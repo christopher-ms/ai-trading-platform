@@ -24,6 +24,33 @@ ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
+# --- DynamoDB persistence (src/data/db.py) ---
+
+# Master switch. When false, src/data/db.py's functions are all no-ops -
+# useful for local runs without AWS credentials. Persistence is always
+# best-effort regardless: a DynamoDB outage never blocks trading, see
+# src/data/db.py's module docstring.
+DYNAMODB_ENABLED = os.getenv("DYNAMODB_ENABLED", "true").lower() == "true"
+
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+
+# Only set for local testing against DynamoDB Local; leave unset in prod
+# to use real DynamoDB.
+DYNAMODB_ENDPOINT_URL = os.getenv("DYNAMODB_ENDPOINT_URL") or None
+
+DYNAMODB_DAILY_RISK_STATE_TABLE = os.getenv(
+    "DYNAMODB_DAILY_RISK_STATE_TABLE", "trading-daily-risk-state"
+)
+DYNAMODB_TRAILING_STOPS_TABLE = os.getenv(
+    "DYNAMODB_TRAILING_STOPS_TABLE", "trading-trailing-stops"
+)
+DYNAMODB_MONITORING_STATE_TABLE = os.getenv(
+    "DYNAMODB_MONITORING_STATE_TABLE", "trading-monitoring-daily-state"
+)
+DYNAMODB_TRADE_HISTORY_TABLE = os.getenv(
+    "DYNAMODB_TRADE_HISTORY_TABLE", "trading-trade-history"
+)
+
 # How often main.run_forever() runs a full trading cycle, in minutes.
 RUN_INTERVAL_MINUTES = 30
 

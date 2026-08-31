@@ -8,14 +8,19 @@ in src/data/, src/analysis/, and src/trading/ report into this module
 this module decides when that activity crosses a warning threshold.
 
 Like _DailyState in src/trading/risk.py, all state here is a module-level
-singleton living only in process memory - it resets on restart and is
-not shared across processes. See that file's docstring for why that's
-an acceptable simplification in this system.
+singleton living in process memory for the running process. Unlike
+_DailyState, it's checkpointed to DynamoDB (src/data/db.py) only once per
+run() cycle rather than on every mutation - it's pure observability data,
+not a safety gate, so losing at most one in-progress cycle's counters on
+a restart is an acceptable tradeoff for far fewer writes. See
+persist_state() and db.py's module docstring for the write-behind,
+best-effort persistence pattern this follows.
 """
 
 import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
+from typing import TYPE_CHECKING
 
 from src.config import (
     CLAUDE_TOKEN_WARNING_THRESHOLD,
@@ -25,7 +30,13 @@ from src.config import (
     MAX_CONSECUTIVE_ZERO_TRADE_RUNS,
     RUN_PORTFOLIO_DROP_WARNING_PCT,
 )
+from src.data import db
 from src.utils.market_hours import EASTERN_TIMEZONE
+
+if TYPE_CHECKING:
+    # Import guarded to avoid a runtime cycle: executor.py imports this
+    # module, so this module can't import executor.py at import time.
+    from src.trading.executor import TradeResult
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +90,13 @@ def _today() -> date:
 
 
 def _reset_if_new_day() -> None:
-    """Log yesterday's summary (if any) and roll _state over on a new day."""
+    """
+    Log yesterday's summary (if any) and roll _state over on a new day.
+
+    Also covers process startup (tracking_date starts as None): before
+    resetting to defaults, tries to load today's checkpoint from
+    DynamoDB in case this is a same-day restart.
+    """
     today = _today()
     if _state.tracking_date == today:
         return
@@ -89,17 +106,33 @@ def _reset_if_new_day() -> None:
 
     _state.tracking_date = today
     _state.recent_call_timestamps = {}
-    _state.daily_call_counts = {}
-    _state.claude_call_count = 0
-    _state.claude_input_tokens = 0
-    _state.claude_output_tokens = 0
-    _state.daily_trade_result_counts = {}
-    _state.consecutive_alpaca_failures = 0
-    _state.consecutive_zero_trade_runs = 0
-    _state.starting_portfolio_value = None
-    _state.last_portfolio_value = None
-    _state.warnings_today = []
-    _state.errors_today = []
+    loaded = db.load_monitoring_state(today.isoformat())
+
+    if loaded is not None:
+        _state.daily_call_counts = loaded.get("daily_call_counts", {})
+        _state.claude_call_count = loaded.get("claude_call_count", 0)
+        _state.claude_input_tokens = loaded.get("claude_input_tokens", 0)
+        _state.claude_output_tokens = loaded.get("claude_output_tokens", 0)
+        _state.daily_trade_result_counts = loaded.get("daily_trade_result_counts", {})
+        _state.consecutive_alpaca_failures = loaded.get("consecutive_alpaca_failures", 0)
+        _state.consecutive_zero_trade_runs = loaded.get("consecutive_zero_trade_runs", 0)
+        _state.starting_portfolio_value = loaded.get("starting_portfolio_value")
+        _state.last_portfolio_value = loaded.get("last_portfolio_value")
+        _state.warnings_today = loaded.get("warnings_today", [])
+        _state.errors_today = loaded.get("errors_today", [])
+        logger.info("Restored monitoring state for %s from DynamoDB.", today)
+    else:
+        _state.daily_call_counts = {}
+        _state.claude_call_count = 0
+        _state.claude_input_tokens = 0
+        _state.claude_output_tokens = 0
+        _state.daily_trade_result_counts = {}
+        _state.consecutive_alpaca_failures = 0
+        _state.consecutive_zero_trade_runs = 0
+        _state.starting_portfolio_value = None
+        _state.last_portfolio_value = None
+        _state.warnings_today = []
+        _state.errors_today = []
 
 
 def _warn(message: str) -> None:
@@ -218,23 +251,38 @@ def log_claude_usage(input_tokens: int, output_tokens: int) -> None:
         )
 
 
-def record_trade_result(status: str) -> None:
+def record_trade_result(result: "TradeResult", source: str) -> None:
     """
-    Tally one TradeResult's status for the daily summary.
+    Tally one TradeResult's status for the daily summary and append it to
+    the trade_history table for audit purposes.
 
     Call this once for every TradeResult produced, whether from a new
     AI-driven signal (src/trading/executor.py) or an automatic exit
     (src/trading/positions.py).
 
     Args:
-        status: One of SKIPPED, REJECTED, FILLED, PENDING, ERROR.
+        result: The TradeResult to record.
+        source: "signal" for an AI-driven trade, "stop_exit" for an
+            automatic stop-loss/take-profit/trailing-stop close.
 
     Returns:
         None.
     """
     _reset_if_new_day()
-    _state.daily_trade_result_counts[status] = (
-        _state.daily_trade_result_counts.get(status, 0) + 1
+    _state.daily_trade_result_counts[result.status] = (
+        _state.daily_trade_result_counts.get(result.status, 0) + 1
+    )
+
+    db.save_trade_result(
+        symbol=result.symbol,
+        action=result.action,
+        status=result.status,
+        reason=result.reason,
+        order_id=result.order_id,
+        filled_price=result.filled_price,
+        filled_qty=result.filled_qty,
+        source=source,
+        trading_date=_state.tracking_date.isoformat(),
     )
 
 
@@ -419,6 +467,38 @@ def run_health_checks(alpaca_client) -> tuple[bool, list[str]]:
             _record_error(reason)
 
     return len(problems) == 0, problems
+
+
+def persist_state() -> None:
+    """
+    Checkpoint the current day's monitoring counters to DynamoDB.
+
+    Call this once at the end of every run() cycle (see main.py::run()),
+    not on every individual counter mutation - see this module's
+    docstring for why a checkpoint is the right granularity for data
+    that's purely observability rather than a safety gate. Best-effort;
+    see db.py's module docstring.
+
+    Returns:
+        None.
+    """
+    _reset_if_new_day()
+    db.save_monitoring_state(
+        _state.tracking_date.isoformat(),
+        {
+            "daily_call_counts": _state.daily_call_counts,
+            "claude_call_count": _state.claude_call_count,
+            "claude_input_tokens": _state.claude_input_tokens,
+            "claude_output_tokens": _state.claude_output_tokens,
+            "daily_trade_result_counts": _state.daily_trade_result_counts,
+            "consecutive_alpaca_failures": _state.consecutive_alpaca_failures,
+            "consecutive_zero_trade_runs": _state.consecutive_zero_trade_runs,
+            "starting_portfolio_value": _state.starting_portfolio_value,
+            "last_portfolio_value": _state.last_portfolio_value,
+            "warnings_today": _state.warnings_today,
+            "errors_today": _state.errors_today,
+        },
+    )
 
 
 def send_metric_to_cloudwatch(metric_name: str, value: float) -> None:

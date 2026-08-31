@@ -177,7 +177,7 @@ def execute_signal(signal: TradingSignal) -> TradeResult:
             reason="Signal action is HOLD; no trade to execute.",
         )
         logger.info("%s | %s | %s", result.symbol, result.status, result.reason)
-        monitoring.record_trade_result(result.status)
+        monitoring.record_trade_result(result, source="signal")
         return result
 
     try:
@@ -192,7 +192,7 @@ def execute_signal(signal: TradingSignal) -> TradeResult:
             reason=f"Failed to reach Alpaca to check account state: {error}",
         )
         logger.error("%s | %s | %s", result.symbol, result.status, result.reason)
-        monitoring.record_trade_result(result.status)
+        monitoring.record_trade_result(result, source="signal")
         return result
 
     current_qty = open_positions.get(signal.symbol, 0.0)
@@ -213,7 +213,7 @@ def execute_signal(signal: TradingSignal) -> TradeResult:
             reason=decision.reason,
         )
         logger.info("%s | %s | %s", result.symbol, result.status, result.reason)
-        monitoring.record_trade_result(result.status)
+        monitoring.record_trade_result(result, source="signal")
         return result
 
     try:
@@ -226,7 +226,7 @@ def execute_signal(signal: TradingSignal) -> TradeResult:
             reason=f"Failed to fetch latest price: {error}",
         )
         logger.error("%s | %s | %s", result.symbol, result.status, result.reason)
-        monitoring.record_trade_result(result.status)
+        monitoring.record_trade_result(result, source="signal")
         return result
 
     quantity = calculate_position_size(
@@ -248,7 +248,7 @@ def execute_signal(signal: TradingSignal) -> TradeResult:
             reason=reason,
         )
         logger.info("%s | %s | %s", result.symbol, result.status, result.reason)
-        monitoring.record_trade_result(result.status)
+        monitoring.record_trade_result(result, source="signal")
         return result
 
     try:
@@ -266,7 +266,7 @@ def execute_signal(signal: TradingSignal) -> TradeResult:
             reason=f"Alpaca rejected the order request: {error}",
         )
         logger.error("%s | %s | %s", result.symbol, result.status, result.reason)
-        monitoring.record_trade_result(result.status)
+        monitoring.record_trade_result(result, source="signal")
         monitoring.record_alpaca_order_outcome(success=False, reason=result.reason)
         return result
     except Exception as error:
@@ -277,7 +277,7 @@ def execute_signal(signal: TradingSignal) -> TradeResult:
             reason=f"Unexpected error submitting order: {error}",
         )
         logger.error("%s | %s | %s", result.symbol, result.status, result.reason)
-        monitoring.record_trade_result(result.status)
+        monitoring.record_trade_result(result, source="signal")
         monitoring.record_alpaca_order_outcome(success=False, reason=result.reason)
         return result
 
@@ -290,7 +290,7 @@ def execute_signal(signal: TradingSignal) -> TradeResult:
             order_id=str(order.id),
         )
         logger.warning("%s | %s | %s", result.symbol, result.status, result.reason)
-        monitoring.record_trade_result(result.status)
+        monitoring.record_trade_result(result, source="signal")
         monitoring.record_alpaca_order_outcome(success=False, reason=result.reason)
         return result
 
@@ -306,7 +306,7 @@ def execute_signal(signal: TradingSignal) -> TradeResult:
             order_id=str(order.id),
         )
         logger.info("%s | %s | %s", result.symbol, result.status, result.reason)
-        monitoring.record_trade_result(result.status)
+        monitoring.record_trade_result(result, source="signal")
         return result
 
     record_trade_executed()
@@ -329,6 +329,6 @@ def execute_signal(signal: TradingSignal) -> TradeResult:
         result.order_id,
         signal.reasoning,
     )
-    monitoring.record_trade_result(result.status)
+    monitoring.record_trade_result(result, source="signal")
     monitoring.record_alpaca_order_outcome(success=True)
     return result

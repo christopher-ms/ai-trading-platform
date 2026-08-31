@@ -10,6 +10,7 @@ from src.config import (
     MAX_POSITION_SIZE_PCT,
     MIN_TRADE_CONFIDENCE,
 )
+from src.data import db
 from src.utils.market_hours import EASTERN_TIMEZONE, is_market_hours
 
 
@@ -82,11 +83,15 @@ class _DailyState:
     """
     Trade count and starting equity for the current Eastern calendar day.
 
-    Lives only in process memory: main.run_forever() keeps one long-lived
-    process running during market hours, so this survives across cycles
-    within a day. A process restart resets it (including halted_for_loss),
-    an acceptable simplification given this system has no persistent
-    trade database.
+    Lives in process memory during the run - main.run_forever() keeps one
+    long-lived process running during market hours, so this survives
+    across cycles within a day without touching DynamoDB. Every mutation
+    is also written through to DynamoDB (src/data/db.py) so a same-day
+    process restart can rehydrate it instead of silently resetting
+    halted_for_loss, the daily loss-limit circuit breaker. If DynamoDB is
+    unavailable, both the write-through and the rehydrate-on-restart fail
+    soft (a logged warning) and this behaves exactly as it did before -
+    correct for the running process, just not durable across a restart.
     """
 
     trading_date: date | None = None
@@ -98,14 +103,42 @@ class _DailyState:
 _daily_state = _DailyState()
 
 
+def _persist_daily_state() -> None:
+    """Write-through _daily_state to DynamoDB. Best-effort; see db.py."""
+    db.save_daily_risk_state(
+        trading_date=_daily_state.trading_date.isoformat(),
+        trades_executed=_daily_state.trades_executed,
+        starting_portfolio_value=_daily_state.starting_portfolio_value,
+        halted_for_loss=_daily_state.halted_for_loss,
+    )
+
+
 def _reset_daily_state_if_new_day() -> None:
-    """Roll _daily_state over when the Eastern calendar date changes."""
+    """
+    Roll _daily_state over when the Eastern calendar date changes.
+
+    Also covers process startup (trading_date starts as None): before
+    resetting to defaults, tries to load today's state from DynamoDB in
+    case this is a same-day restart, so halted_for_loss and the trade
+    count aren't silently forgotten.
+    """
     today = datetime.now(EASTERN_TIMEZONE).date()
-    if _daily_state.trading_date != today:
-        _daily_state.trading_date = today
+    if _daily_state.trading_date == today:
+        return
+
+    _daily_state.trading_date = today
+    loaded = db.load_daily_risk_state(today.isoformat())
+
+    if loaded is not None:
+        _daily_state.trades_executed = loaded.get("trades_executed", 0)
+        _daily_state.starting_portfolio_value = loaded.get("starting_portfolio_value")
+        _daily_state.halted_for_loss = loaded.get("halted_for_loss", False)
+        logger.info("Restored daily risk state for %s from DynamoDB.", today)
+    else:
         _daily_state.trades_executed = 0
         _daily_state.starting_portfolio_value = None
         _daily_state.halted_for_loss = False
+        _persist_daily_state()
 
 
 def record_trade_executed() -> None:
@@ -122,6 +155,7 @@ def record_trade_executed() -> None:
     """
     _reset_daily_state_if_new_day()
     _daily_state.trades_executed += 1
+    _persist_daily_state()
 
 
 def check_market_open() -> RiskDecision | None:
@@ -159,6 +193,7 @@ def check_daily_loss_limit(portfolio_value: float) -> RiskDecision | None:
 
     if _daily_state.starting_portfolio_value is None:
         _daily_state.starting_portfolio_value = portfolio_value
+        _persist_daily_state()
 
     if _daily_state.halted_for_loss:
         return RiskDecision(
@@ -174,6 +209,7 @@ def check_daily_loss_limit(portfolio_value: float) -> RiskDecision | None:
 
     if loss_pct >= DAILY_LOSS_LIMIT_PCT:
         _daily_state.halted_for_loss = True
+        _persist_daily_state()
         return RiskDecision(
             approved=False,
             reason=(
