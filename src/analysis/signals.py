@@ -5,6 +5,7 @@ import anthropic
 from pydantic import BaseModel, Field
 
 from src.config import ANTHROPIC_API_KEY, MIN_TRADE_CONFIDENCE
+from src.data.news import NEWS_LOOKBACK_HOURS
 from src.trading.risk import TradingSignal
 from src.utils import monitoring
 
@@ -138,7 +139,7 @@ def generate_signal(
     user_prompt = (
         f"Ticker: {ticker}\n\n"
         f"Technical indicators:\n{format_indicators(indicators)}\n\n"
-        f"Recent headlines (last 24h):\n{format_news(articles)}\n\n"
+        f"Recent headlines (last {NEWS_LOOKBACK_HOURS}h):\n{format_news(articles)}\n\n"
         "Based only on the data above, provide a trading signal."
     )
 

@@ -438,25 +438,46 @@ def check_anthropic_health() -> tuple[bool, str]:
         return False, f"Anthropic health check failed: {error}"
 
 
-def run_health_checks(alpaca_client) -> tuple[bool, list[str]]:
+def record_health_check_failure(reason: str) -> None:
     """
-    Run all three service health checks.
+    Record a failed health check to today's error log.
 
-    Call this once at the start of every run() cycle, after building the
-    Alpaca client but before doing anything else. If any check fails,
-    the caller should skip the entire cycle rather than fail mid-loop
-    partway through the stock list.
+    Exposed separately from run_health_checks() so callers that check
+    Alpaca on its own (see main.py::run() - Alpaca health gates position
+    protection independently of Finnhub/Anthropic) still get that failure
+    into the daily summary the same way run_health_checks() would.
 
     Args:
-        alpaca_client: An Alpaca TradingClient.
+        reason: The failing check's explanation.
 
     Returns:
-        (True, []) if every service is healthy; (False, reasons) otherwise,
-        where reasons lists every failing check's explanation.
+        None.
+    """
+    _record_error(reason)
+
+
+def run_health_checks() -> tuple[bool, list[str]]:
+    """
+    Run the Finnhub and Anthropic health checks that gate new-signal
+    generation.
+
+    Alpaca's health check is deliberately not included here - see
+    check_alpaca_health() and main.py::run(), which checks Alpaca first
+    and independently, since position protection (check_open_positions())
+    only depends on Alpaca and must keep running even when Finnhub or
+    Anthropic is down.
+
+    Call this once per run() cycle, after check_open_positions() and
+    before evaluating any ticker for a new signal. If any check fails,
+    the caller should skip new-signal generation for the rest of this
+    cycle rather than fail mid-loop partway through the stock list.
+
+    Returns:
+        (True, []) if both services are healthy; (False, reasons)
+        otherwise, where reasons lists every failing check's explanation.
     """
     checks = (
         check_finnhub_health(),
-        check_alpaca_health(alpaca_client),
         check_anthropic_health(),
     )
 

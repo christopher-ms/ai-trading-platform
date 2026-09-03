@@ -111,14 +111,18 @@ def run() -> None:
 
     Order of operations: roll monitoring's daily summary over if a new
     Eastern trading day has started; skip entirely if the market is
-    closed; otherwise verify Finnhub/Alpaca/Anthropic are all reachable;
-    close out any open position that has breached stop-loss, take-profit,
-    or the trailing-stop rule; then, unless today's loss limit has already
-    halted new trading, evaluate every configured stock for a new signal.
+    closed; otherwise verify Alpaca is reachable and, if so, close out
+    any open position that has breached stop-loss, take-profit, or the
+    trailing-stop rule; then check the daily loss limit; then verify
+    Finnhub/Anthropic are also reachable and, unless today's loss limit
+    has already halted new trading, evaluate every configured stock for
+    a new signal.
 
-    Position monitoring always runs ahead of the daily-loss-limit check
-    and is never gated by it, so a halted day still protects existing
-    positions - only the search for new trades stops.
+    Position monitoring only depends on Alpaca, so it's checked and run
+    ahead of - and independent of - both the Finnhub/Anthropic health
+    check and the daily-loss-limit check: a Finnhub/Anthropic outage or
+    a halted day still protects existing positions, only the search for
+    new trades stops.
 
     Returns:
         None.
@@ -137,12 +141,14 @@ def run() -> None:
         logger.error("Unable to build Alpaca trading client: %s", error)
         return
 
-    healthy, problems = monitoring.run_health_checks(client)
-    if not healthy:
+    alpaca_healthy, alpaca_problem = monitoring.check_alpaca_health(client)
+    if not alpaca_healthy:
+        monitoring.record_health_check_failure(alpaca_problem)
         logger.error(
-            "Health check failed; skipping this cycle entirely rather than "
-            "trading against a degraded service: %s",
-            "; ".join(problems),
+            "Alpaca health check failed; skipping this cycle entirely - "
+            "without Alpaca neither position protection nor new trades "
+            "are possible: %s",
+            alpaca_problem,
         )
         return
 
@@ -161,6 +167,16 @@ def run() -> None:
         logger.warning(
             "%s New signals will not be evaluated for the rest of today.",
             loss_decision.reason,
+        )
+        return
+
+    healthy, problems = monitoring.run_health_checks()
+    if not healthy:
+        logger.error(
+            "Finnhub/Anthropic health check failed; skipping new-signal "
+            "generation for this cycle (existing positions remain "
+            "protected): %s",
+            "; ".join(problems),
         )
         return
 
