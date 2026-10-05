@@ -1,5 +1,7 @@
 import logging
 import time
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 from src.analysis.signals import generate_signal
 from src.analysis.technical import calculate_indicators
@@ -13,16 +15,43 @@ from src.utils import monitoring
 from src.utils.market_hours import is_market_hours, is_market_open_per_alpaca
 
 
+LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
+LOG_FILE = LOG_DIR / "trading.log"
+
+# 10MB per file, 5 backups kept - run_forever() runs indefinitely, so logs
+# must be bounded or they'd grow forever. ~15 lines/ticker x 12 tickers x
+# ~13 cycles/day is a few thousand lines/day; 10MB holds weeks of that.
+LOG_FILE_MAX_BYTES = 10 * 1024 * 1024
+LOG_FILE_BACKUP_COUNT = 5
+
+
 def setup_logging() -> None:
     """
     Configure application-wide Python logging.
 
+    Logs to both the console and a rotating file under LOG_DIR, since
+    run_forever() runs unattended for hours at a time - with DynamoDB
+    disabled (or just absent from a given cycle), the log file is the
+    only durable record of what the system did, including the daily
+    summary generate_daily_summary() logs.
+
     Returns:
         None.
     """
+    LOG_DIR.mkdir(exist_ok=True)
+
     logging.basicConfig(
         level=getattr(logging, LOG_LEVEL),
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        handlers=[
+            logging.StreamHandler(),
+            RotatingFileHandler(
+                LOG_FILE,
+                maxBytes=LOG_FILE_MAX_BYTES,
+                backupCount=LOG_FILE_BACKUP_COUNT,
+                encoding="utf-8",
+            ),
+        ],
     )
 
 
