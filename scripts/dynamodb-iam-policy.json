@@ -1,0 +1,23 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "TradingBotDynamoDbAccess",
+            "Effect": "Allow",
+            "Action": [
+                "dynamodb:CreateTable",
+                "dynamodb:DescribeTable",
+                "dynamodb:PutItem",
+                "dynamodb:GetItem",
+                "dynamodb:DeleteItem",
+                "dynamodb:Scan"
+            ],
+            "Resource": [
+                "arn:aws:dynamodb:*:*:table/trading-daily-risk-state",
+                "arn:aws:dynamodb:*:*:table/trading-trailing-stops",
+                "arn:aws:dynamodb:*:*:table/trading-monitoring-daily-state",
+                "arn:aws:dynamodb:*:*:table/trading-trade-history"
+            ]
+        }
+    ]
+}

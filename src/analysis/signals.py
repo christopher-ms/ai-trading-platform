@@ -56,7 +56,13 @@ headlines that drove the decision."""
 
 
 class _SignalOutput(BaseModel):
-    """Schema Claude's response is validated against by client.messages.parse."""
+    """
+    Schema Claude's response is validated against by client.messages.parse.
+
+    risk_level is advisory only - see TradingSignal's docstring in risk.py.
+    Nothing downstream sizes or gates on it; it exists for a human reading
+    trade history, not for the trading logic itself.
+    """
 
     action: Literal["BUY", "SELL", "HOLD"]
     confidence: float = Field(ge=0.0, le=1.0)

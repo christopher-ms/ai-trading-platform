@@ -30,7 +30,16 @@ class TradingSignal:
         symbol: Stock ticker symbol.
         confidence: Model confidence in the signal, between 0.0 and 1.0.
         reasoning: Human-readable explanation for the signal.
-        risk_level: One of LOW, MEDIUM, HIGH.
+        risk_level: One of LOW, MEDIUM, HIGH - Claude's own volatility-based
+            read on this specific signal (see signals.py's system prompt).
+            Advisory only: logged for a human reviewing trade history, but
+            nothing in risk.py or executor.py reads it. Sizing is driven
+            entirely by confidence via get_position_size_pct(). Don't
+            confuse this with config.py's RISK_LEVEL, an unrelated global
+            dial that happens to share the name. Wiring this into sizing
+            is a live trading-behavior change and an unvalidated one - do
+            it deliberately, with real trade history to check it against,
+            not as an incidental cleanup.
     """
 
     action: str

@@ -1,4 +1,5 @@
 import logging
+import math
 
 import pandas as pd
 
@@ -189,6 +190,19 @@ def calculate_indicators(
             "volume_ratio": calculate_volume_analysis(data),
             "volatility": calculate_volatility(data),
         }
+
+        # RSI divides average gain by average loss, which is 0/0 (NaN) for a
+        # stock with zero net movement over the window - rare, but it would
+        # otherwise sail past every check above and reach Claude's prompt as
+        # the literal text "RSI (14-day): nan". Treat it like any other
+        # data-quality failure so the caller's existing except skips this
+        # ticker for the cycle instead of asking the model to reason about it.
+        non_finite = [name for name, value in indicators.items() if not math.isfinite(value)]
+        if non_finite:
+            raise ValueError(
+                f"Non-finite indicator value(s): {', '.join(non_finite)} - likely "
+                "a stock with no price movement across the lookback window."
+            )
 
         logger.info("Technical indicators calculated successfully.")
 
