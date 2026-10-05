@@ -13,7 +13,18 @@ from src.utils import monitoring
 logger = logging.getLogger(__name__)
 
 MODEL = "claude-opus-5"
-MAX_TOKENS = 4096
+
+# Opus 5 runs adaptive thinking whenever `thinking` is omitted, and those
+# thinking tokens are drawn from max_tokens - so a budget sized for just the
+# four-field JSON answer can truncate the response mid-thought and fail the
+# parse. Leave generous headroom; the structured output itself is tiny, and
+# unused budget costs nothing.
+MAX_TOKENS = 16000
+
+# Scoring six indicators and a handful of headlines is a small classification
+# task, not a reasoning problem. Low effort keeps thinking short, which keeps
+# both latency and per-call cost down across 12 tickers every cycle.
+EFFORT = "low"
 
 SYSTEM_PROMPT = f"""You are a disciplined trading analyst for a paper-trading system. \
 You produce a single trading signal (BUY, SELL, or HOLD) for one stock at a time, \
@@ -151,6 +162,7 @@ def generate_signal(
             max_tokens=MAX_TOKENS,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_prompt}],
+            output_config={"effort": EFFORT},
             output_format=_SignalOutput,
         )
     except anthropic.RateLimitError as error:

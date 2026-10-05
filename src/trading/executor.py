@@ -295,6 +295,13 @@ def execute_signal(signal: TradingSignal) -> TradeResult:
         return result
 
     if order.status.value != "filled":
+        # Still live at the exchange and will most likely fill, so it consumes
+        # a MAX_DAILY_TRADES slot just like a confirmed fill - nothing ever
+        # observes the later fill to count it retroactively. A canceled order
+        # never reached the market, so it doesn't count.
+        if order.status.value != "canceled":
+            record_trade_executed()
+
         result = TradeResult(
             status="PENDING",
             symbol=signal.symbol,

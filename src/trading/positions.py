@@ -98,6 +98,14 @@ def _close_position(
         )
         monitoring.record_alpaca_order_outcome(success=False, reason=result.reason)
     else:
+        # An order that hasn't filled within the poll window is still live at
+        # the exchange and will most likely fill, so it consumes a
+        # MAX_DAILY_TRADES slot just like a confirmed fill - nothing ever
+        # observes the later fill to count it retroactively. A canceled order
+        # never reached the market, so it doesn't count.
+        if order.status.value != "canceled":
+            record_trade_executed()
+
         result = TradeResult(
             status="PENDING",
             symbol=symbol,
@@ -161,12 +169,21 @@ def check_open_positions(client: TradingClient) -> list[TradeResult]:
                 else f"stop-loss (-{STOP_LOSS_PCT:.1%})"
             )
             reason = f"{stop_label} triggered at {pl_pct:+.2%} unrealized"
-            results.append(_close_position(client, symbol, qty, reason))
-            _trailing_stop_active.discard(symbol)
-            db.delete_trailing_stop(symbol)
+            result = _close_position(client, symbol, qty, reason)
         elif pl_pct >= TAKE_PROFIT_PCT:
             reason = f"take-profit (+{TAKE_PROFIT_PCT:.1%}) triggered at {pl_pct:+.2%} unrealized"
-            results.append(_close_position(client, symbol, qty, reason))
+            result = _close_position(client, symbol, qty, reason)
+        else:
+            continue
+
+        results.append(result)
+
+        # Only forget the trailing stop once the position is actually gone. A
+        # rejected, errored, or still-unfilled exit leaves the position open,
+        # and clearing the flag here would quietly revert its stop from
+        # breakeven back to -STOP_LOSS_PCT on the next cycle - losing
+        # protection at exactly the moment the exit already failed once.
+        if result.status == "FILLED":
             _trailing_stop_active.discard(symbol)
             db.delete_trailing_stop(symbol)
 

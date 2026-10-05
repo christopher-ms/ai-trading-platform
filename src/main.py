@@ -10,7 +10,7 @@ from src.trading.executor import TradeResult, execute_signal, get_portfolio_valu
 from src.trading.positions import check_open_positions
 from src.trading.risk import check_daily_loss_limit
 from src.utils import monitoring
-from src.utils.market_hours import is_market_hours
+from src.utils.market_hours import is_market_hours, is_market_open_per_alpaca
 
 
 def setup_logging() -> None:
@@ -110,13 +110,15 @@ def run() -> None:
     Run one full trading cycle.
 
     Order of operations: roll monitoring's daily summary over if a new
-    Eastern trading day has started; skip entirely if the market is
-    closed; otherwise verify Alpaca is reachable and, if so, close out
-    any open position that has breached stop-loss, take-profit, or the
-    trailing-stop rule; then check the daily loss limit; then verify
-    Finnhub/Anthropic are also reachable and, unless today's loss limit
-    has already halted new trading, evaluate every configured stock for
-    a new signal.
+    Eastern trading day has started; skip entirely if the local clock
+    says the market is closed; otherwise verify Alpaca is reachable and
+    that Alpaca's own calendar agrees the market is open (the local check
+    knows nothing about exchange holidays or early closes), and if so,
+    close out any open position that has breached stop-loss, take-profit,
+    or the trailing-stop rule; then check the daily loss limit; then
+    verify Finnhub/Anthropic are also reachable and, unless today's loss
+    limit has already halted new trading, evaluate every configured stock
+    for a new signal.
 
     Position monitoring only depends on Alpaca, so it's checked and run
     ahead of - and independent of - both the Finnhub/Anthropic health
@@ -149,6 +151,13 @@ def run() -> None:
             "without Alpaca neither position protection nor new trades "
             "are possible: %s",
             alpaca_problem,
+        )
+        return
+
+    if not is_market_open_per_alpaca(client):
+        logger.info(
+            "Alpaca reports the market closed despite local market hours "
+            "(exchange holiday or early close). Skipping this cycle."
         )
         return
 

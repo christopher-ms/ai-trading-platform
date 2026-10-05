@@ -414,15 +414,20 @@ def evaluate_signal(
         logger.info("Decision for %s: %s", signal.symbol, decision.reason)
         return decision
 
+    # Deferred so an earlier rejection genuinely short-circuits the rest:
+    # check_daily_loss_limit sets the day's baseline equity and can latch
+    # halted_for_loss, so it must not run on a signal already rejected for
+    # being out of hours.
     checks = (
-        check_market_open(),
-        check_daily_loss_limit(portfolio_value),
-        check_confidence_threshold(signal),
-        check_daily_trade_limit(),
-        check_position_limit(signal, open_position_count, already_holds_symbol),
+        lambda: check_market_open(),
+        lambda: check_daily_loss_limit(portfolio_value),
+        lambda: check_confidence_threshold(signal),
+        lambda: check_daily_trade_limit(),
+        lambda: check_position_limit(signal, open_position_count, already_holds_symbol),
     )
 
-    for decision in checks:
+    for check in checks:
+        decision = check()
         if decision is not None:
             logger.warning(
                 "Signal rejected for %s: %s",
