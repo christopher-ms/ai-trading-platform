@@ -64,3 +64,5 @@ market history (yfinance) -> technical indicators -> news (Finnhub company-news)
 ## Issues & test history
 
 `docs/ISSUES.md` records every problem found so far (cause and fix, or status if still open) and every real test run with its results. Read it before debugging anything that looks like a repeat. Whenever you fix a new issue or run a real test, add an entry there; don't add it here.
+
+`docs/PROJECT_LOG.md` is the step-by-step history of the project (what was built when, and why) plus a "Current status" block. When something meaningful changes (a feature, a config change, a milestone, a decision), append an entry and update that status block.
