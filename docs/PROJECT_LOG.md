@@ -16,7 +16,11 @@ _Last updated: 2026-10-09 (after the close)_
 - **Not yet verified:** a SELL signal from Claude, an exit triggered automatically by a stop or target, the loss-limit halt, the trade caps, DynamoDB.
 - **Not connected:** AWS (`DYNAMODB_ENABLED=false`).
 - **Known open issues:** the laptop can't run the bot reliably (standby throttles it, and positions are unprotected when it isn't running: ISSUES #14, #16); no natural signal has reached 0.70 yet (highest so far 0.62, ISSUES #13).
-- **Next up:** move the bot fully to AWS this weekend (EC2/Lightsail server + DynamoDB + CloudWatch Logs) so it runs with the laptop off, plus a backup stop order at Alpaca on every entry. Monday 2026-10-12 is the first live day on AWS.
+- **Next up (roadmap agreed 2026-10-09):**
+  1. **Weekend of Oct 10–11: move fully to AWS.** EC2/Lightsail server running the loop as an auto-restarting service, DynamoDB persistence on, logs shipped to CloudWatch, plus a backup stop order at Alpaca on every entry so stops hold even if the server dies. The user creates the AWS account, IAM user and billing alert; Claude does the rest. Then turn off the laptop copy and restore the laptop's sleep setting (idle sleep was 5 min on AC and battery).
+  2. **Week of Oct 12: watch it run live on AWS** with a daily log review. If it trades, confirm stops and targets fire on their own. If nothing reaches 0.70 after several sessions, investigate the threshold, prompt and indicators using real data.
+  3. **In parallel: automated tests for the risk logic** (stop-loss, take-profit, trailing stop, loss-limit halt, trade and position caps) using fake prices, so the safety features are proven without waiting for the market to trigger them.
+  4. **Then several weeks of paper results** before judging the strategy (win rate, average gain vs. loss, vs. buy-and-hold SPY). Real money isn't on the table until then, and the code has no live-money path anyway.
 
 ---
 
