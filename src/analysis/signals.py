@@ -101,7 +101,7 @@ def format_indicators(indicators: dict[str, float]) -> str:
         f"- 50-day moving average: ${indicators['moving_average_50']:.2f}\n"
         f"- RSI (14-day): {indicators['rsi']:.1f}\n"
         f"- MACD: {indicators['macd']:.2f}\n"
-        f"- Volume ratio (current / 20-day avg): {indicators['volume_ratio']:.2f}\n"
+        f"- Volume ratio (last full session / 20-day avg): {indicators['volume_ratio']:.2f}\n"
         f"- Annualized volatility: {indicators['volatility']:.1%}"
     )
 

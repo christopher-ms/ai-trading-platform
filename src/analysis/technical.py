@@ -1,7 +1,10 @@
 import logging
 import math
+from datetime import datetime
 
 import pandas as pd
+
+from src.utils.market_hours import EASTERN_TIMEZONE, is_market_hours
 
 
 logger = logging.getLogger(__name__)
@@ -107,23 +110,53 @@ def calculate_macd(
     return float(macd.iloc[-1])
 
 
+def _last_bar_is_in_progress(data: pd.DataFrame) -> bool:
+    """
+    Check whether the final daily bar is today's not-yet-closed session.
+
+    Args:
+        data: Historical market data indexed by date.
+
+    Returns:
+        True when the last bar is dated today (Eastern) and the market is
+        still within regular hours; otherwise False.
+    """
+    if data.empty or not is_market_hours():
+        return False
+
+    last_timestamp = pd.Timestamp(data.index[-1])
+    if last_timestamp.tzinfo is not None:
+        last_timestamp = last_timestamp.tz_convert(EASTERN_TIMEZONE)
+
+    return last_timestamp.date() == datetime.now(EASTERN_TIMEZONE).date()
+
+
 def calculate_volume_analysis(
     data: pd.DataFrame,
     period: int = 20,
 ) -> float:
     """
-    Compare the latest trading volume with its recent average.
+    Compare the latest completed session's volume with its recent average.
+
+    During market hours yfinance's last daily bar is today's still-forming
+    session, so its volume is only a fraction of a full day's - comparing
+    it against full-day averages reads as "low volume" on every ticker
+    every cycle, worst in the morning. That bar is dropped here so the
+    ratio always compares one full session against full sessions.
 
     Args:
         data: Historical market data containing a Volume column.
         period: Number of trading days used for average volume.
 
     Returns:
-        The ratio of current volume to average volume.
+        The ratio of the last completed session's volume to average volume.
 
     Raises:
         ValueError: If insufficient data is available.
     """
+    if _last_bar_is_in_progress(data):
+        data = data.iloc[:-1]
+
     if len(data) < period:
         raise ValueError(
             f"Need at least {period} days of data for volume analysis."

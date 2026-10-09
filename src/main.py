@@ -1,4 +1,5 @@
 import logging
+import sys
 import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -261,4 +262,11 @@ def run_forever() -> None:
 
 if __name__ == "__main__":
     setup_logging()
-    run_forever()
+
+    # --once runs a single cycle and exits - for manual test runs, with
+    # the same logging setup as the loop (calling run() directly from a
+    # bare python -c skips setup_logging() and logs almost nothing).
+    if "--once" in sys.argv[1:]:
+        run()
+    else:
+        run_forever()
