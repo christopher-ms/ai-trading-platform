@@ -8,14 +8,15 @@ An AI-assisted stock trading bot that paper-trades on Alpaca (simulated money, $
 
 ## Current status
 
-_Last updated: 2026-10-09_
+_Last updated: 2026-10-09 (after the close)_
 
-- **Working, verified for real:** data, indicators, news, Claude signals, risk gate, and the full buy path to an Alpaca fill (one handmade test order).
-- **Open position:** 12 SPY @ $778.49, a test position from 2026-10-09.
-- **Not yet verified:** SELL signals, automatic exits, the loss-limit halt, the trade caps, DynamoDB.
-- **Not connected:** AWS (DynamoDB persistence is switched off with `DYNAMODB_ENABLED=false`).
-- **Known open issues:** positions are unprotected when the loop isn't running; no natural signal has reached the 0.70 confidence gate yet. See `ISSUES.md` #14 and #13.
-- **Next up:** let the loop run and watch for exits; set up auto-restart (Windows Task Scheduler); connect AWS.
+- **Working, verified for real:** data, indicators, news, Claude signals, the risk gate, the full **buy** path (handmade order → Alpaca fill), the **sell/exit** path (`_close_position` → Alpaca fill), position monitoring on a live position, and the zero-trade-streak warning.
+- **Positions:** none. All cash, $100,002.65 (the test trade made +$2.65).
+- **Nothing is running.** The loop was stopped after the close on 2026-10-09.
+- **Not yet verified:** a SELL signal from Claude, an exit triggered automatically by a stop or target, the loss-limit halt, the trade caps, DynamoDB.
+- **Not connected:** AWS (`DYNAMODB_ENABLED=false`).
+- **Known open issues:** the laptop can't run the bot reliably (standby throttles it, and positions are unprotected when it isn't running: ISSUES #14, #16); no natural signal has reached 0.70 yet (highest so far 0.62, ISSUES #13).
+- **Next up:** move the bot fully to AWS this weekend (EC2/Lightsail server + DynamoDB + CloudWatch Logs) so it runs with the laptop off, plus a backup stop order at Alpaca on every entry. Monday 2026-10-12 is the first live day on AWS.
 
 ---
 
@@ -63,3 +64,7 @@ _Last updated: 2026-10-09_
 19. **First real order** (14:15 ET): a handmade BUY SPY at confidence 0.90 went through the real executor. Risk approved it, it was sized to 12 shares (the $10k cap), and **Alpaca filled it in under a second at $778.49**. Confirmed independently on Alpaca.
 20. **Documentation** (`5ae63bb`): created `docs/ISSUES.md` (every issue and every test run) and this project log.
 21. **Loop restarted** (14:21 ET) to protect the SPY position and keep looking for signals until the close.
+22. **Laptop power** (about 15:00 ET): found the laptop was set to sleep after 5 minutes idle and running on battery. Turned idle sleep off. The power log later showed Windows still entering Modern Standby whenever the screen turned off, which delayed one loop cycle by 24 minutes (ISSUES #16). This confirmed the laptop isn't a reliable host.
+23. **Decision: move fully to AWS.** Not just DynamoDB, but run the bot itself on an always-on AWS server, so it runs with the laptop off. Task Scheduler was considered and skipped, since it only helps while the laptop is awake.
+24. **First real sell** (15:45 ET): the SPY test position was closed on a schedule through the bot's own exit path. Alpaca filled 12 @ $778.71; the round trip made +$2.65. Closed rather than held over the weekend, both to test the sell side and to start the AWS move with nothing at risk.
+25. **End of day 1** (16:05 ET): the loop ran 3 more cycles with no errors and no qualifying signals (highest 0.60), and the zero-trade warning fired as designed. Loop stopped. Account all cash at $100,002.65.
