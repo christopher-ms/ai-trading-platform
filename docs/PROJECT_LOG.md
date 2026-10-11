@@ -8,13 +8,14 @@ An AI-assisted stock trading bot that paper-trades on Alpaca (simulated money, $
 
 ## Current status
 
-_Last updated: 2026-10-09 (after the close)_
+_Last updated: 2026-10-10_
 
 - **Working, verified for real:** data, indicators, news, Claude signals, the risk gate, the full **buy** path (handmade order → Alpaca fill), the **sell/exit** path (`_close_position` → Alpaca fill), position monitoring on a live position, and the zero-trade-streak warning.
 - **Positions:** none. All cash, $100,002.65 (the test trade made +$2.65).
 - **Nothing is running.** The loop was stopped after the close on 2026-10-09.
-- **Not yet verified:** a SELL signal from Claude, an exit triggered automatically by a stop or target, the loss-limit halt, the trade caps, DynamoDB.
-- **Not connected:** AWS (`DYNAMODB_ENABLED=false`).
+- **Not yet verified:** a SELL signal from Claude, an exit triggered automatically by a stop or target, the loss-limit halt, the trade caps, DynamoDB restoring state across a real restart.
+- **AWS:** account set up and **DynamoDB connected** (2026-10-10, step 27; `DYNAMODB_ENABLED=true`, us-east-1). The bot still runs on the laptop; the EC2 server, CloudWatch logs and auto-restart are next.
+- **New, not yet run with a real position:** a backup stop order at Alpaca on every long position (step 26).
 - **Known open issues:** the laptop can't run the bot reliably (standby throttles it, and positions are unprotected when it isn't running: ISSUES #14, #16); no natural signal has reached 0.70 yet (highest so far 0.62, ISSUES #13).
 - **Next up (roadmap agreed 2026-10-09):**
   1. **Weekend of Oct 10–11: move fully to AWS.** EC2/Lightsail server running the loop as an auto-restarting service, DynamoDB persistence on, logs shipped to CloudWatch, plus a backup stop order at Alpaca on every entry so stops hold even if the server dies. The user creates the AWS account, IAM user and billing alert; Claude does the rest. Then turn off the laptop copy and restore the laptop's sleep setting (idle sleep was 5 min on AC and battery).
@@ -72,3 +73,9 @@ _Last updated: 2026-10-09 (after the close)_
 23. **Decision: move fully to AWS.** Not just DynamoDB, but run the bot itself on an always-on AWS server, so it runs with the laptop off. Task Scheduler was considered and skipped, since it only helps while the laptop is awake.
 24. **First real sell** (15:45 ET): the SPY test position was closed on a schedule through the bot's own exit path. Alpaca filled 12 @ $778.71; the round trip made +$2.65. Closed rather than held over the weekend, both to test the sell side and to start the AWS move with nothing at risk.
 25. **End of day 1** (16:05 ET): the loop ran 3 more cycles with no errors and no qualifying signals (highest 0.60), and the zero-trade warning fired as designed. Loop stopped. Account all cash at $100,002.65.
+
+## Phase 6: Moving to AWS (Oct 10–11, 2026)
+
+26. **Backup stop orders at Alpaca** (Oct 10): new `src/trading/backup_stops.py`. Every long position gets a resting GTC stop order at Alpaca at the bot's own effective stop level, so the stop-loss holds even when the bot isn't running. `positions.py` keeps it in sync every cycle (moves it to breakeven when the trailing stop activates, resizes it, cancels leftovers), and `executor.py` places it right after a BUY fills. Every sell cancels it first, since a resting stop holds the shares. Tested against a fake Alpaca client; not yet run on a real position. (ISSUES #14)
+27. **DynamoDB connected** (Oct 10): the user set up AWS and created the four tables. Verified that their schemas match `scripts/setup_dynamodb.py`, turned persistence on in `.env` (`DYNAMODB_ENABLED=true`, `AWS_REGION=us-east-1`), and did a real save/read/delete round trip on every table.
+28. **`--dry-run` flag** (Oct 10): `python -m src.main --dry-run` runs one full cycle at any hour (real data, news, Claude, risk and sizing) but sends no orders and writes nothing to DynamoDB. It logs what it would have done instead. Chosen over a requested `--force-run` (skip the hours check, still trade). That flag would either have done nothing, since `risk.py` has its own hours check, or, with that check bypassed too, queued real market orders to fill at Monday's open on Friday's data. First dry run: all 12 tickers analyzed, no side effects.

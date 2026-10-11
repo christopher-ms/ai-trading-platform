@@ -11,6 +11,7 @@ from src.config import (
     MIN_TRADE_CONFIDENCE,
 )
 from src.data import db
+from src.utils import dry_run
 from src.utils.market_hours import EASTERN_TIMEZONE, is_market_hours
 
 
@@ -173,9 +174,10 @@ def check_market_open() -> RiskDecision | None:
 
     Returns:
         A rejecting RiskDecision if the market is closed, otherwise None
-        so evaluate_signal can move on to the next check.
+        so evaluate_signal can move on to the next check. Always None in
+        a dry run, which exists to test the pipeline outside market hours.
     """
-    if not is_market_hours():
+    if not is_market_hours() and not dry_run.is_enabled():
         return RiskDecision(approved=False, reason="Market is closed.")
 
     return None

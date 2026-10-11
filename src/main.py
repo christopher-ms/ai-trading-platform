@@ -12,7 +12,7 @@ from src.data.news import get_stock_news
 from src.trading.executor import TradeResult, execute_signal, get_portfolio_value, get_trading_client
 from src.trading.positions import check_open_positions
 from src.trading.risk import check_daily_loss_limit
-from src.utils import monitoring
+from src.utils import dry_run, monitoring
 from src.utils.market_hours import is_market_hours, is_market_open_per_alpaca
 
 
@@ -163,7 +163,12 @@ def run() -> None:
 
     monitoring.maybe_generate_daily_summary()
 
-    if not is_market_hours():
+    if dry_run.is_enabled():
+        logger.info(
+            "DRY RUN: market-hours gates skipped; no orders will be sent to "
+            "Alpaca and nothing will be written to DynamoDB."
+        )
+    elif not is_market_hours():
         logger.info("Market is currently closed. Skipping this cycle.")
         return
 
@@ -184,7 +189,7 @@ def run() -> None:
         )
         return
 
-    if not is_market_open_per_alpaca(client):
+    if not dry_run.is_enabled() and not is_market_open_per_alpaca(client):
         logger.info(
             "Alpaca reports the market closed despite local market hours "
             "(exchange holiday or early close). Skipping this cycle."
@@ -220,10 +225,22 @@ def run() -> None:
         return
 
     trades_filled_this_run = 0
+    would_trade = []
     for ticker in STOCKS:
         result = analyze_stock(ticker)
         if result is not None and result.status == "FILLED":
             trades_filled_this_run += 1
+        if result is not None and result.status == "DRY_RUN":
+            would_trade.append(f"{result.action} {result.symbol}")
+
+    if dry_run.is_enabled():
+        logger.info(
+            "DRY RUN complete: %d of %d tickers would have traded%s",
+            len(would_trade),
+            len(STOCKS),
+            f" ({', '.join(would_trade)})." if would_trade else ".",
+        )
+        return
 
     monitoring.check_zero_trade_streak(trades_filled_this_run)
     monitoring.persist_state()
@@ -266,7 +283,13 @@ if __name__ == "__main__":
     # --once runs a single cycle and exits - for manual test runs, with
     # the same logging setup as the loop (calling run() directly from a
     # bare python -c skips setup_logging() and logs almost nothing).
-    if "--once" in sys.argv[1:]:
+    #
+    # --dry-run runs a single cycle at any hour with no orders sent and
+    # no DynamoDB writes - see src/utils/dry_run.py.
+    if "--dry-run" in sys.argv[1:]:
+        dry_run.enable()
+        run()
+    elif "--once" in sys.argv[1:]:
         run()
     else:
         run_forever()

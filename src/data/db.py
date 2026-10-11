@@ -36,6 +36,8 @@ from typing import Any
 import boto3
 from botocore.config import Config
 
+from src.utils import dry_run
+
 from src.config import (
     AWS_REGION,
     DYNAMODB_DAILY_RISK_STATE_TABLE,
@@ -114,6 +116,9 @@ def _from_dynamo(value: Any) -> Any:
 
 
 def _put_item(table_name: str, item: dict) -> bool:
+    # A dry run reads real state but must never change it (src/utils/dry_run.py).
+    if dry_run.is_enabled():
+        return False
     table = _table(table_name)
     if table is None:
         return False
@@ -138,6 +143,8 @@ def _get_item(table_name: str, key: dict) -> dict | None:
 
 
 def _delete_item(table_name: str, key: dict) -> bool:
+    if dry_run.is_enabled():
+        return False
     table = _table(table_name)
     if table is None:
         return False

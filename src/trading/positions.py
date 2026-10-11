@@ -5,6 +5,10 @@ check_open_positions runs once per trading cycle, before any new signal
 is evaluated, so a position that has moved against (or strongly in favor
 of) the account since the last cycle is closed out immediately rather
 than waiting on the next AI signal for that symbol.
+
+It also keeps a broker-side backup stop order (backup_stops.py) in sync
+with each position's effective stop, so the stop still holds at Alpaca
+if this process isn't running.
 """
 
 import logging
@@ -14,9 +18,10 @@ from alpaca.trading.enums import OrderSide
 
 from src.config import STOP_LOSS_PCT, TAKE_PROFIT_PCT, TRAILING_STOP_TRIGGER_PCT
 from src.data import db
+from src.trading import backup_stops
 from src.trading.executor import TradeResult, submit_market_order
 from src.trading.risk import record_trade_executed
-from src.utils import monitoring
+from src.utils import dry_run, monitoring
 
 
 logger = logging.getLogger(__name__)
@@ -58,6 +63,17 @@ def _close_position(
     Returns:
         A TradeResult describing what happened.
     """
+    if dry_run.is_enabled():
+        result = TradeResult(
+            status="DRY_RUN",
+            symbol=symbol,
+            action="SELL",
+            reason=f"Dry run: would close {qty:g} shares ({reason}); no order sent.",
+        )
+        logger.info("%s | %s | %s", result.symbol, result.status, result.reason)
+        monitoring.record_trade_result(result, source="stop_exit")
+        return result
+
     logger.info("%s | closing position: %s", symbol, reason)
 
     try:
@@ -130,6 +146,11 @@ def check_open_positions(client: TradingClient) -> list[TradeResult]:
       (0%) and stays there for the life of the position.
     - If unrealized P/L falls to or below the effective stop, sell.
     - Otherwise, if unrealized P/L reaches TAKE_PROFIT_PCT, sell.
+    - Otherwise, keep the position's backup stop at Alpaca in line with
+      its effective stop (placing it if missing, moving it to breakeven
+      once the trailing stop activates, resizing it if the position grew).
+
+    Backup stops left behind for symbols no longer held are canceled.
 
     Args:
         client: Alpaca trading client.
@@ -145,6 +166,16 @@ def check_open_positions(client: TradingClient) -> list[TradeResult]:
     _trailing_stop_active.intersection_update(live_symbols)
     for symbol in stale_symbols:
         db.delete_trailing_stop(symbol)
+
+    try:
+        open_backup_stops = backup_stops.get_backup_stops(client)
+    except Exception as error:
+        logger.error("Failed to fetch backup stop orders: %s", error)
+        open_backup_stops = None
+
+    if open_backup_stops is not None:
+        for symbol in open_backup_stops.keys() - live_symbols:
+            backup_stops.cancel_backup_stops(client, symbol, open_backup_stops[symbol])
 
     results = []
 
@@ -169,14 +200,43 @@ def check_open_positions(client: TradingClient) -> list[TradeResult]:
                 else f"stop-loss (-{STOP_LOSS_PCT:.1%})"
             )
             reason = f"{stop_label} triggered at {pl_pct:+.2%} unrealized"
-            result = _close_position(client, symbol, qty, reason)
         elif pl_pct >= TAKE_PROFIT_PCT:
             reason = f"take-profit (+{TAKE_PROFIT_PCT:.1%}) triggered at {pl_pct:+.2%} unrealized"
-            result = _close_position(client, symbol, qty, reason)
         else:
+            if open_backup_stops is not None:
+                backup_stops.ensure_backup_stop(
+                    client,
+                    symbol,
+                    qty=qty,
+                    entry_price=entry_price,
+                    stop_pct=effective_stop_pct,
+                    existing=open_backup_stops.get(symbol, []),
+                )
             continue
 
+        # The backup stop holds the shares at Alpaca, so the exit sell would
+        # be rejected for insufficient quantity while it's still open.
+        backup_stops.cancel_backup_stops(
+            client,
+            symbol,
+            open_backup_stops.get(symbol, []) if open_backup_stops is not None else None,
+        )
+        result = _close_position(client, symbol, qty, reason)
         results.append(result)
+
+        # A rejected or errored exit leaves the position open with its backup
+        # stop already canceled - put it back rather than leave the position
+        # unprotected at the broker. (A PENDING exit is still live and holds
+        # the shares itself, so there's nothing to re-place.)
+        if result.status in ("REJECTED", "ERROR"):
+            backup_stops.ensure_backup_stop(
+                client,
+                symbol,
+                qty=qty,
+                entry_price=entry_price,
+                stop_pct=effective_stop_pct,
+                existing=[],
+            )
 
         # Only forget the trailing stop once the position is actually gone. A
         # rejected, errored, or still-unfilled exit leaves the position open,

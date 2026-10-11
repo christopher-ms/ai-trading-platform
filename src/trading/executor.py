@@ -8,15 +8,16 @@ from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.trading.models import Order
 from alpaca.trading.requests import MarketOrderRequest
 
-from src.config import ALPACA_API_KEY, ALPACA_SECRET_KEY
+from src.config import ALPACA_API_KEY, ALPACA_SECRET_KEY, STOP_LOSS_PCT
 from src.data.market import get_live_price
+from src.trading import backup_stops
 from src.trading.risk import (
     TradingSignal,
     calculate_position_size,
     evaluate_signal,
     record_trade_executed,
 )
-from src.utils import monitoring
+from src.utils import dry_run, monitoring
 
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,9 @@ class TradeResult:
     Outcome of attempting to execute a trading signal.
 
     Attributes:
-        status: One of SKIPPED, REJECTED, FILLED, PENDING, ERROR.
+        status: One of SKIPPED, REJECTED, FILLED, PENDING, ERROR, or
+            DRY_RUN (approved and sized, but no order sent - see
+            src/utils/dry_run.py).
         symbol: Stock ticker symbol.
         action: The signal action that was attempted.
         reason: Human-readable explanation of the outcome.
@@ -152,6 +155,23 @@ def submit_market_order(
     return order
 
 
+def _restore_backup_stop_after_failed_sell(
+    client: TradingClient,
+    signal: TradingSignal,
+) -> None:
+    """
+    Re-place a position's backup stop after a SELL that didn't go through.
+
+    The SELL path cancels the backup stop before submitting, so a failed
+    sell would otherwise leave the position unprotected at the broker until
+    the next cycle. Uses the plain -STOP_LOSS_PCT level; if the position's
+    trailing stop had moved it to breakeven, the next check_open_positions
+    cycle moves it back.
+    """
+    if signal.action == "SELL":
+        backup_stops.protect_position(client, signal.symbol, stop_pct=-STOP_LOSS_PCT)
+
+
 def execute_signal(signal: TradingSignal) -> TradeResult:
     """
     Run a trading signal through risk management and, if approved,
@@ -251,6 +271,26 @@ def execute_signal(signal: TradingSignal) -> TradeResult:
         monitoring.record_trade_result(result, source="signal")
         return result
 
+    if dry_run.is_enabled():
+        result = TradeResult(
+            status="DRY_RUN",
+            symbol=signal.symbol,
+            action=signal.action,
+            reason=(
+                f"Dry run: would {signal.action} {quantity:g} @ ~${price:.2f} "
+                f"(no order sent). {signal.reasoning}"
+            ),
+        )
+        logger.info("%s | %s | %s", result.symbol, result.status, result.reason)
+        monitoring.record_trade_result(result, source="signal")
+        return result
+
+    # A SELL closes the whole position, and the position's backup stop
+    # (backup_stops.py) holds those shares at Alpaca - it has to go first or
+    # the sell is rejected for insufficient quantity.
+    if signal.action == "SELL":
+        backup_stops.cancel_backup_stops(client, signal.symbol)
+
     try:
         order = submit_market_order(
             client,
@@ -266,6 +306,7 @@ def execute_signal(signal: TradingSignal) -> TradeResult:
             reason=f"Alpaca rejected the order request: {error}",
         )
         logger.error("%s | %s | %s", result.symbol, result.status, result.reason)
+        _restore_backup_stop_after_failed_sell(client, signal)
         monitoring.record_trade_result(result, source="signal")
         monitoring.record_alpaca_order_outcome(success=False, reason=result.reason)
         return result
@@ -277,6 +318,7 @@ def execute_signal(signal: TradingSignal) -> TradeResult:
             reason=f"Unexpected error submitting order: {error}",
         )
         logger.error("%s | %s | %s", result.symbol, result.status, result.reason)
+        _restore_backup_stop_after_failed_sell(client, signal)
         monitoring.record_trade_result(result, source="signal")
         monitoring.record_alpaca_order_outcome(success=False, reason=result.reason)
         return result
@@ -290,6 +332,7 @@ def execute_signal(signal: TradingSignal) -> TradeResult:
             order_id=str(order.id),
         )
         logger.warning("%s | %s | %s", result.symbol, result.status, result.reason)
+        _restore_backup_stop_after_failed_sell(client, signal)
         monitoring.record_trade_result(result, source="signal")
         monitoring.record_alpaca_order_outcome(success=False, reason=result.reason)
         return result
@@ -317,6 +360,13 @@ def execute_signal(signal: TradingSignal) -> TradeResult:
         return result
 
     record_trade_executed()
+
+    # Put a broker-side stop under the new (or enlarged) position right away
+    # rather than waiting up to a full cycle for check_open_positions to do
+    # it. A BUY that's still PENDING here gets its stop from that next-cycle
+    # reconcile instead, once it has filled.
+    if signal.action == "BUY":
+        backup_stops.protect_position(client, signal.symbol, stop_pct=-STOP_LOSS_PCT)
 
     result = TradeResult(
         status="FILLED",
