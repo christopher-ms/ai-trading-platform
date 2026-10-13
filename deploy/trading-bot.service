@@ -1,0 +1,20 @@
+[Unit]
+Description=AI trading bot (Alpaca paper trading loop)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/ai-trading-platform
+ExecStart=/home/ubuntu/ai-trading-platform/venv/bin/python -m src.main
+# Python buffers stdout when it isn't a terminal; without this, journalctl
+# shows nothing until the buffer fills.
+Environment=PYTHONUNBUFFERED=1
+# Restart on crash, on an unhandled exception, and after a reboot. The 30s
+# pause stops a crash-on-startup bug from hammering Alpaca/Finnhub.
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

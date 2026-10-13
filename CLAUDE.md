@@ -32,7 +32,15 @@ python -m src.main --dry-run  # one cycle at ANY hour; no orders, no DynamoDB wr
 
 Everything is logged to the console and `logs/trading.log`. Don't call `run()` from a bare `python -c` — that skips `setup_logging()` and you'll see almost nothing; use `--once`. Don't run `--once` while the loop is also running: with `DYNAMODB_ENABLED=false` each process keeps its own in-memory daily trade counter, so two processes can together exceed `MAX_DAILY_TRADES` and trade the same signal twice.
 
-There is no test suite, linter, or formatter configured in this repo (no `pytest`/`ruff`/`flake8` config, no CI). Verify changes by importing the touched module directly, e.g. `venv/Scripts/python.exe -c "import src.trading.risk"` — the system `python` on PATH will not have `alpaca-py`/`anthropic` installed, only the venv's will.
+Unit tests (stdlib `unittest`, no pytest) cover the risk logic: `risk.py`'s gates and sizing, `positions.py`'s stop-loss/take-profit/trailing stop, `backup_stops.py`, and the `RISK_LEVEL` dial. They use fake prices and a fake Alpaca client, never the network:
+
+```
+venv/Scripts/python.exe -m unittest discover -s tests -t . -v
+```
+
+`tests/__init__.py` forces `DYNAMODB_ENABLED=false` before any `src` import so tests can't write to the real tables; keep it that way. There is no linter, formatter, or CI. For modules without tests, verify a change by at least importing it, e.g. `venv/Scripts/python.exe -c "import src.trading.risk"`. The system `python` on PATH doesn't have `alpaca-py`/`anthropic` installed, only the venv's does.
+
+Deployment to EC2 (systemd service, CloudWatch logs, instance role) is in `docs/DEPLOY.md` and `deploy/`.
 
 ## Architecture
 
