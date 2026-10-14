@@ -52,7 +52,7 @@ DYNAMODB_TRADE_HISTORY_TABLE = os.getenv(
 )
 
 # How often main.run_forever() runs a full trading cycle, in minutes.
-RUN_INTERVAL_MINUTES = 30
+RUN_INTERVAL_MINUTES = 60
 
 # Not scaled by RISK_LEVEL: how many distinct symbols can be held open at
 # once is a portfolio-diversification limit, not a risk-per-trade dial.

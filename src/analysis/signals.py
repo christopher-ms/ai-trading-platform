@@ -12,7 +12,7 @@ from src.utils import monitoring
 
 logger = logging.getLogger(__name__)
 
-MODEL = "claude-opus-5"
+MODEL = "claude-haiku-5-5"
 
 # Opus 5 runs adaptive thinking whenever `thinking` is omitted, and those
 # thinking tokens are drawn from max_tokens - so a budget sized for just the

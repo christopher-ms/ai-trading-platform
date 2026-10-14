@@ -4,15 +4,15 @@ The story of this project step by step: what was built, in what order, and why. 
 
 ## What this is
 
-An AI-assisted stock trading bot that paper-trades on Alpaca (simulated money, $100k starting balance; there is no live-money path in the code). Every 30 minutes during market hours, it goes through 12 tickers (AAPL, MSFT, NVDA, AMZN, META, GOOGL, TSLA, AMD, JPM, V, SPY, QQQ). For each one it pulls price history and news, computes technical indicators, asks Claude for a BUY/SELL/HOLD signal with a confidence score, and places an order only if the signal clears a set of risk checks. It also watches open positions for stop-loss, take-profit, and trailing-stop exits.
+An AI-assisted stock trading bot that paper-trades on Alpaca (simulated money, $100k starting balance; there is no live-money path in the code). Every 60 minutes during market hours, it goes through 12 tickers (AAPL, MSFT, NVDA, AMZN, META, GOOGL, TSLA, AMD, JPM, V, SPY, QQQ). For each one it pulls price history and news, computes technical indicators, asks Claude for a BUY/SELL/HOLD signal with a confidence score, and places an order only if the signal clears a set of risk checks. It also watches open positions for stop-loss, take-profit, and trailing-stop exits.
 
 ## Current status
 
-_Last updated: 2026-10-12_
+_Last updated: 2026-10-13_
 
 - **Working, verified for real:** data, indicators, news, Claude signals, the risk gate, the full **buy** path (handmade order → Alpaca fill), the **sell/exit** path (`_close_position` → Alpaca fill), position monitoring on a live position, and the zero-trade-streak warning.
 - **Positions:** none. All cash, $100,002.65 (the test trade made +$2.65).
-- **Running on AWS EC2** as a persistent service since 2026-10-12 (step 31), one cycle every 30 minutes (`RUN_INTERVAL_MINUTES`, confirmed). The dry run on the server passed.
+- **Running on AWS EC2** as a persistent service since 2026-10-12 (step 31), one cycle every 30 minutes until step 32 changed it to 60 (`RUN_INTERVAL_MINUTES`). The dry run on the server passed. Signals now come from Claude Haiku 5.5 (step 32); **the server needs a redeploy and restart to pick this up**.
 - **Not yet verified:** a SELL signal from Claude, an exit triggered automatically by a stop or target, the loss-limit halt, the trade caps, DynamoDB restoring state across a real restart.
 - **AWS:** account set up and **DynamoDB connected** (2026-10-10, step 27; `DYNAMODB_ENABLED=true`, us-east-1). **EC2 server launched** with an IAM instance role, code deployed, bot running (step 31). **CloudWatch log shipping is not set up yet**, so logs are only on the server (`logs/trading.log`, `journalctl -u trading-bot`).
 - **Tests:** 63 unit tests for the risk logic, all passing (step 29). Run them with `venv/Scripts/python.exe -m unittest discover -s tests -t . -v`.
@@ -83,3 +83,7 @@ _Last updated: 2026-10-12_
 29. **Automated tests for the risk logic** (Oct 12): roadmap item 3. 63 stdlib `unittest` tests in `tests/` using fake prices and a fake Alpaca client: every `risk.py` gate and the sizing tiers, `positions.py`'s stop-loss, take-profit and trailing stop (including what happens when an exit is rejected, errors or stays pending), `backup_stops.py`, and the `RISK_LEVEL` dial. All pass; no bugs found. The safety features are now proven in logic without waiting for the market to trigger them.
 30. **EC2 deploy kit** (Oct 12): roadmap item 1, the server half. `deploy/` holds a systemd unit (`Restart=always`), a server setup script (Python 3.13 via uv, requirements, unit tests, CloudWatch agent), a laptop-side push script (`git archive HEAD` + `.env` over scp), a CloudWatch agent config (ships `logs/trading.log`, 90-day retention), and an instance-role IAM policy (the four tables plus `/trading-bot/*` logs), so no AWS keys live on the server. Plan: Ubuntu 24.04 on a t3.micro in us-east-1. Runbook in `docs/DEPLOY.md`. Not launched yet.
 31. **Bot deployed to AWS** (Oct 12, done by the user): DynamoDB tables in place, EC2 instance launched with an IAM instance role, code deployed, a `--dry-run` on the server confirmed the full pipeline works, and the bot now runs as a persistent service. Run interval confirmed at 30 minutes. **CloudWatch log shipping was not set up yet** (`deploy/cloudwatch-agent.json` is ready for it). This takes the bot off the laptop (ISSUES #16).
+
+## Phase 7: Running on AWS (Oct 13, 2026)
+
+32. **Cheaper, less frequent signals** (Oct 13): `signals.py` switched from `claude-opus-5` to `claude-haiku-5-5` (same `effort: low`, structured output and `max_tokens`), and `RUN_INTERVAL_MINUTES` raised from 30 to 60. This halves the number of cycles per day and cuts the per-call Claude price sharply. Haiku may score confidence differently from Opus, so watch whether signals still approach the 0.70 gate (ISSUES #13). Takes effect on the server only after a redeploy and service restart.
