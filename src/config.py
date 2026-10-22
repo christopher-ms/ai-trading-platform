@@ -8,8 +8,8 @@ load_dotenv()
 
 
 STOCKS = [
-    "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL",
-    "TSLA", "AMD", "JPM", "V", "SPY", "QQQ",
+    "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA",
+    "JPM", "V", "SPY", "XOM", "UNH", "COST", "CAT",
 ]
 
 HISTORY_PERIOD = "3mo"

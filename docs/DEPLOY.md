@@ -49,7 +49,7 @@ sudo systemctl status trading-bot
 journalctl -u trading-bot -f               # live output (Ctrl+C to stop watching)
 ```
 
-The dry run should analyze all 12 tickers with no errors. Check that it doesn't log any `DynamoDB |` warnings: those would mean the instance role isn't attached.
+The dry run should analyze all 14 tickers with no errors. Check that it doesn't log any `DynamoDB |` warnings: those would mean the instance role isn't attached.
 
 **Only one copy of the bot may run at a time.** Make sure nothing is running on the laptop before starting the service (see CLAUDE.md on two processes double-trading).
 

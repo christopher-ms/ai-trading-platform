@@ -23,7 +23,7 @@ MAX_TOKENS = 16000
 
 # Scoring six indicators and a handful of headlines is a small classification
 # task, not a reasoning problem. Low effort keeps thinking short, which keeps
-# both latency and per-call cost down across 12 tickers every cycle.
+# both latency and per-call cost down across 14 tickers every cycle.
 EFFORT = "low"
 
 SYSTEM_PROMPT = f"""You are a disciplined trading analyst for a paper-trading system. \

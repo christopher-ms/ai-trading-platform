@@ -20,7 +20,7 @@ LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 LOG_FILE = LOG_DIR / "trading.log"
 
 # 10MB per file, 5 backups kept - run_forever() runs indefinitely, so logs
-# must be bounded or they'd grow forever. ~15 lines/ticker x 12 tickers x
+# must be bounded or they'd grow forever. ~15 lines/ticker x 14 tickers x
 # ~13 cycles/day is a few thousand lines/day; 10MB holds weeks of that.
 LOG_FILE_MAX_BYTES = 10 * 1024 * 1024
 LOG_FILE_BACKUP_COUNT = 5
