@@ -1,0 +1,50 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "AlertsSnsTopic",
+            "Effect": "Allow",
+            "Action": [
+                "sns:CreateTopic",
+                "sns:DeleteTopic",
+                "sns:GetTopicAttributes",
+                "sns:SetTopicAttributes",
+                "sns:ListTagsForResource",
+                "sns:Subscribe",
+                "sns:Unsubscribe",
+                "sns:GetSubscriptionAttributes",
+                "sns:SetSubscriptionAttributes",
+                "sns:ListSubscriptionsByTopic"
+            ],
+            "Resource": [
+                "arn:aws:sns:us-east-1:*:trading-bot-alerts",
+                "arn:aws:sns:us-east-1:*:trading-bot-alerts:*"
+            ]
+        },
+        {
+            "Sid": "AlertsMetricFilters",
+            "Effect": "Allow",
+            "Action": [
+                "logs:PutMetricFilter",
+                "logs:DeleteMetricFilter",
+                "logs:DescribeMetricFilters"
+            ],
+            "Resource": [
+                "arn:aws:logs:us-east-1:*:log-group:/trading-bot/*"
+            ]
+        },
+        {
+            "Sid": "AlertsAlarms",
+            "Effect": "Allow",
+            "Action": [
+                "cloudwatch:PutMetricAlarm",
+                "cloudwatch:DeleteAlarms",
+                "cloudwatch:DescribeAlarms",
+                "cloudwatch:ListTagsForResource"
+            ],
+            "Resource": [
+                "arn:aws:cloudwatch:us-east-1:*:alarm:trading-bot-*"
+            ]
+        }
+    ]
+}

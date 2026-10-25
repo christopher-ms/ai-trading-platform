@@ -1,0 +1,23 @@
+# Local development only. The live bot runs on EC2 (docs/DEPLOY.md), and a
+# second copy trading the same Alpaca account would double-trade (CLAUDE.md).
+# So the default here is --dry-run: one full cycle at any hour, real data and
+# real Claude calls, but no orders and no DynamoDB writes.
+#
+#   docker compose up --build                            # one dry-run cycle
+#   docker compose run --rm bot --dry-run                # same, then remove the container
+services:
+  bot:
+    build: .
+    image: ai-trading-bot:dev
+    env_file: .env
+    environment:
+      # No AWS credentials inside the container, so skip DynamoDB entirely
+      # rather than letting every read fail. Overrides the value in .env.
+      DYNAMODB_ENABLED: "false"
+    command: ["--dry-run"]
+    volumes:
+      - bot-logs:/app/logs
+    restart: "no"
+
+volumes:
+  bot-logs:

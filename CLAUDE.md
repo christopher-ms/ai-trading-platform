@@ -30,6 +30,8 @@ python -m src.main --dry-run  # one cycle at ANY hour; no orders, no DynamoDB wr
 
 `--dry-run` (`src/utils/dry_run.py`) is the way to test the full pipeline outside market hours. It skips all three market-hours gates (two in `run()`, plus `risk.py::check_market_open`) and runs real data, news, Claude, risk and sizing. It stops before Alpaca: `executor.py` and `positions.py::_close_position` return a `DRY_RUN` `TradeResult`, `backup_stops.py` only logs, and `db.py`'s write helpers no-op (reads still happen). It's safe to run alongside the live loop. **Never** bypass the market-hours gates *without* dry run: Alpaca doesn't reject a DAY market order placed while the market is closed, it queues it for the next open, so a weekend "test" would buy at Monday's open on Friday's data.
 
+Docker (local development only; the EC2 bot still runs under systemd from a venv): `docker compose up --build` runs one `--dry-run` cycle in a container, with secrets read from `.env` at runtime and DynamoDB forced off. Keep the compose default at `--dry-run`, since a container running the live loop would be a second copy trading the same Alpaca account. The image uses `python:3.13-slim` because `requirements.txt` is frozen from the 3.13 venv (its numpy pin needs 3.12+).
+
 Everything is logged to the console and `logs/trading.log`. Don't call `run()` from a bare `python -c` — that skips `setup_logging()` and you'll see almost nothing; use `--once`. Don't run `--once` while the loop is also running: with `DYNAMODB_ENABLED=false` each process keeps its own in-memory daily trade counter, so two processes can together exceed `MAX_DAILY_TRADES` and trade the same signal twice.
 
 Unit tests (stdlib `unittest`, no pytest) cover the risk logic: `risk.py`'s gates and sizing, `positions.py`'s stop-loss/take-profit/trailing stop, `backup_stops.py`, and the `RISK_LEVEL` dial. They use fake prices and a fake Alpaca client, never the network:
@@ -41,6 +43,8 @@ venv/Scripts/python.exe -m unittest discover -s tests -t . -v
 `tests/__init__.py` forces `DYNAMODB_ENABLED=false` before any `src` import so tests can't write to the real tables; keep it that way. There is no linter, formatter, or CI. For modules without tests, verify a change by at least importing it, e.g. `venv/Scripts/python.exe -c "import src.trading.risk"`. The system `python` on PATH doesn't have `alpaca-py`/`anthropic` installed, only the venv's does.
 
 Deployment to EC2 (systemd service, CloudWatch logs, instance role) is in `docs/DEPLOY.md` and `deploy/`.
+
+Email alerting is Terraform in `terraform/` (SNS topic `trading-bot-alerts` with an email subscription, plus a `trading-bot-offline` alarm that fires after 90 minutes with no log lines in `/trading-bot/trading.log`, 24/7). Run `terraform init` / `plan` / `apply` from that directory; the alert address lives in the gitignored `terraform/terraform.tfvars`. `scripts/terraform-alerts-iam-policy.json` is the least-privilege policy for running it. CloudWatch alarm emails only carry alarm metadata, never log text, so anything that needs log content in an email (e.g. the daily summary) can't be done with metric filters alone.
 
 ## Architecture
 

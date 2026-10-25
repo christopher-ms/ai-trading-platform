@@ -1,0 +1,24 @@
+# Secrets: passed in at runtime (docker compose env_file / docker run --env-file), never baked in.
+.env
+.env.*
+!.env.example
+
+venv/
+.venv/
+logs/
+**/__pycache__/
+**/*.pyc
+.git/
+.gitignore
+
+# Not needed to run the bot.
+tests/
+docs/
+deploy/
+scripts/
+terraform/
+.claude/
+*.md
+Dockerfile
+docker-compose.yml
+.dockerignore
