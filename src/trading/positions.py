@@ -203,6 +203,15 @@ def check_open_positions(client: TradingClient) -> list[TradeResult]:
         elif pl_pct >= TAKE_PROFIT_PCT:
             reason = f"take-profit (+{TAKE_PROFIT_PCT:.1%}) triggered at {pl_pct:+.2%} unrealized"
         else:
+            logger.info(
+                "%s | position OK | qty=%g | entry=$%.2f | now=$%.2f | P/L=%+.2f%% | stop=%+.1f%%",
+                symbol,
+                qty,
+                entry_price,
+                current_price,
+                pl_pct * 100,
+                effective_stop_pct * 100,
+            )
             if open_backup_stops is not None:
                 backup_stops.ensure_backup_stop(
                     client,

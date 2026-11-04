@@ -284,11 +284,13 @@ def check_position_limit(
     already_holds_symbol: bool,
 ) -> RiskDecision | None:
     """
-    Reject new BUYs once the open position limit is reached.
+    Reject BUYs on a symbol already held, and new BUYs once the open
+    position limit is reached.
 
-    Adding to an existing position or selling out of one never counts
-    against the limit, since neither increases the number of open
-    positions.
+    Adding to a held position is rejected outright: its resting backup
+    stop is an opposite-side order, so Alpaca would refuse the BUY as a
+    potential wash trade anyway (ISSUES #18). Selling out of a position
+    never counts against the limit.
 
     Args:
         signal: The trading signal to check.
@@ -300,8 +302,14 @@ def check_position_limit(
         A rejecting RiskDecision if the position limit blocks this trade,
         otherwise None so evaluate_signal can move on to the next check.
     """
-    if signal.action != "BUY" or already_holds_symbol:
+    if signal.action != "BUY":
         return None
+
+    if already_holds_symbol:
+        return RiskDecision(
+            approved=False,
+            reason=f"Already holding {signal.symbol}; not adding to an open position.",
+        )
 
     if open_position_count >= MAX_OPEN_POSITIONS:
         return RiskDecision(

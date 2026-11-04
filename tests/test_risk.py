@@ -175,8 +175,18 @@ class TestPositionLimit(RiskTestCase):
     def test_new_symbol_allowed_below_max(self):
         self.assertTrue(self.evaluate(open_positions=config.MAX_OPEN_POSITIONS - 1).approved)
 
-    def test_adding_to_held_symbol_allowed_at_max(self):
-        self.assertTrue(self.evaluate(open_positions=config.MAX_OPEN_POSITIONS, holds=True).approved)
+    def test_buy_on_held_symbol_rejected(self):
+        # ISSUES #18: Alpaca refuses it as a wash trade while the backup stop rests.
+        decision = self.evaluate(open_positions=1, holds=True)
+
+        self.assertFalse(decision.approved)
+        self.assertIn("Already holding AAPL", decision.reason)
+
+    def test_buy_on_held_symbol_rejected_at_max(self):
+        decision = self.evaluate(open_positions=config.MAX_OPEN_POSITIONS, holds=True)
+
+        self.assertFalse(decision.approved)
+        self.assertIn("Already holding AAPL", decision.reason)
 
     def test_sell_allowed_at_max(self):
         signal = make_signal(action="SELL")

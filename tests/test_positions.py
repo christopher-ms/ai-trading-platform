@@ -78,6 +78,17 @@ class TestStopLoss(PositionsTestCase):
             self.calls.ensure_backup_stop.call_args.kwargs["stop_pct"], -config.STOP_LOSS_PCT
         )
 
+    def test_healthy_position_logs_a_status_line(self):
+        # ISSUES #15: a check that ran must look different from one that didn't.
+        with self.assertLogs(positions.logger, level="INFO") as logs:
+            self.run_check(self.at_pl(0.03))
+
+        self.assertEqual(len(logs.output), 1)
+        self.assertIn(
+            "AAPL | position OK | qty=10 | entry=$100.00 | now=$103.00 | P/L=+3.00% | stop=-5.0%",
+            logs.output[0],
+        )
+
     def test_loss_past_stop_closes_full_position(self):
         results = self.run_check(self.at_pl(-config.STOP_LOSS_PCT - 0.005))
 
